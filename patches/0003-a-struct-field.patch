@@ -1,0 +1,13 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0003-a] struct 字段 vital_curve（拆分自 0003 v3，单 hunk 缩小失败半径）
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -330,2 +330,6 @@
+-    pub dynamic_special_targets: bool
++    pub dynamic_special_targets: bool,
++
++    /// 分年体力曲线（fanfix 0003）：vital_factor 按年阶梯下降（Y1 4.0/Y2 3.5/Y3 2.5/URA 0.25）
++    /// 并对训练回体力对称计值（现行把 +vital 吞成 0）。`false`（默认）= 旧行为逐位保留。
++    pub vital_curve: bool
+ }
