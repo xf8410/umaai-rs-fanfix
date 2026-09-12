@@ -1,79 +1,12 @@
-From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0003 v3] feat(umasim): 体力按年降价曲线 + 训练回体力对称计值（配置门控 vcurve，默认关逐位不变）
+# 本文件已拆分（09-12）
 
-用户定调（09-12 原话）：「体力门限40不能再低了 会导致训练失败，但可能是体力收益判高了，
-尤其是第三年大量用友人和100%减失败率的情况下可能需要一个按年份变化的体力价值。」
-守门 40 不动（本 patch 不触碰 gate）；只改估值层体力定价方向。
+单文件多 hunk 手工数行连续出错（v1 漏逗号、v2 行数头错），失败半径=整轮 CI。
+现按 4 个单 hunk 小补丁应用（见 .github/workflows/umasim-test.yml bench 步骤）：
 
-根因（读码报告 §3，docs/source-valuation-report.md）：dynamic_vital 的
-vital_factor = 3.5 + turn/72×2（URA 前）——越到后期体力越贵（Y3 turn60≈5.2/点），
-与真实影子价方向相反：Y3 吃面必成（fail_rate_drop=100）、友人外出 48-80 恢复、
-有马 +40、URA +20/回合，体力应比 Y1 更便宜。另有对称性缺陷：训练回体力
-（智训 +5）被 (-vital).max(0) 吞成 0 不计值，速/耐/力/根 -20~-27 全额收费。
+- `0003-a-struct-field.patch` — struct 字段 + 尾逗号
+- `0003-b-default-impl.patch` — Default impl
+- `0003-c-dynamic-vital.patch` — 分年价格曲线 + 回体力对称计值
+- `0003-d-token.patch` — with_tokens "vcurve"
 
-修复（配置门控 vital_curve，默认 false 逐位不变）：
-(1) 价格曲线分年：Y1 4.0（≈现行）→ Y2 3.5（现行 4.2-4.8）→ Y3 2.5（现行 4.9-5.4）→ URA 0.25（不变）；
-(2) 计值对称化：c = −val.vital（含正向），智训 +5 体力获得回收价值。
-with_tokens("vcurve") 开启；bench v7 四臂 base/rclamp/vcurve/both 验证后再定 preset 默认值。
-各 hunk 与 0001 正交（struct/Default 尾、dynamic_vital 块、pg token 块后），可顺序应用。
-
-v2→v3 修订记录：v1 漏给 struct 末字段补尾逗号（E0585→E0689 级联，run 34668130162）；
-v2 hunk#1 行数头声明 7 实为 6（corrupt at :34，run 34671233017）。v3 代码内容与 v2 完全一致，
-仅修正 @@ 计数：h1 old2/new6、h2 old2/new3、h3 old8/new26、h4 old6/new11，逐手数过。
-
---- a/crates/umasim/src/trainer/local_ramen_trainer.rs
-+++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -330,2 +330,6 @@
--    pub dynamic_special_targets: bool
-+    pub dynamic_special_targets: bool,
-+
-+    /// 分年体力曲线（fanfix 0003）：vital_factor 按年阶梯下降（Y1 4.0/Y2 3.5/Y3 2.5/URA 0.25）
-+    /// 并对训练回体力对称计值（现行把 +vital 吞成 0）。`false`（默认）= 旧行为逐位保留。
-+    pub vital_curve: bool
- }
-@@ -379,2 +383,3 @@
--            dynamic_special_targets: false
-+            dynamic_special_targets: false,
-+            vital_curve: false
-         }
-@@ -994,8 +999,26 @@
-             if self.config.dynamic_vital {
--                let c = (-val.vital).max(0) as f32;
--                let z = -c * (Self::vital_factor(g.turn()) - self.policy.config.train_vital_value);
-+                let f = if self.config.vital_curve {
-+                    let t = g.turn();
-+                    if t >= 72 {
-+                        0.25
-+                    } else if t < 24 {
-+                        4.0
-+                    } else if t < 48 {
-+                        3.5
-+                    } else {
-+                        2.5
-+                    }
-+                } else {
-+                    Self::vital_factor(g.turn())
-+                };
-+                let c = if self.config.vital_curve {
-+                    -(val.vital as f32)
-+                } else {
-+                    (-val.vital).max(0) as f32
-+                };
-+                let z = -c * (f - self.policy.config.train_vital_value);
-                 o.score += z;
-                 if self.policy.collect_details {
-                     o.add("dynamic_vital", z);
-                 }
-             }
-@@ -1120,6 +1143,11 @@
-                 for year in trainer.years.iter_mut() {
-                     year.config.power_gap_strength = s;
-                 }
-+            } else if token == "vcurve" {
-+                // 分年体力曲线 + 回体力对称计值（fanfix 0003）：软化后期体力定价。
-+                for year in trainer.years.iter_mut() {
-+                    year.config.vital_curve = true;
-+                }
-             } else {
-                 anyhow::bail!("未知 token: {token}（完整: {tokens}）");
-             }
+完整论证（用户定调、根因、修复设计）见 git 历史中 v3 版本（commit 53fbad83）。
+设计与纪律：配置门控 vital_curve 默认 false 逐位不变；守门 40 不触碰。
