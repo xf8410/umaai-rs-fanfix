@@ -32,7 +32,7 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
              wisdom_vital_floor: i32::MAX,
 +            gate_low_risk_max_fail: 0.0,
              motivation_outing: 3,
-@@ -317,4 +324,22 @@
+@@ -317,4 +324,23 @@
                  .iter()
                  .any(|a| matches!(&a.operation, Operation::Train(t) if *t as usize == 4));
 -        if uma.vital < rest_threshold && !wisdom_exempt {
@@ -59,7 +59,7 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
              if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -1081,4 +1081,10 @@ impl RecommendedRamenTrainer {
+@@ -1081,4 +1081,11 @@ impl RecommendedRamenTrainer {
                  for year in trainer.years.iter_mut() {
                      year.policy.config.wisdom_vital_floor = floor;
                  }
