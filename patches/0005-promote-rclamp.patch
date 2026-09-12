@@ -1,0 +1,18 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0005] 丙-1 转正：preset make() 默认开 reserve_clamp（单 hunk）
+
+表决依据（docs/ab-results-rclamp.md + v8 五臂 run 34673756565）：A/B 140 局 −0.1% 噪声级、
+train/game +0.09、悬崖单元 1149.23→0（repro-patched cliff_readings VERDICT GREEN），
+且修复与 policy 层注释「为拿 PT 练满位是正当行为」自相矛盾的原文一致——纯纠错转正。
+锚=字节通道实读（local_ramen_trainer.rs 偏移 97178：make() 尾部，三处唯一，
+make 被三年份共用=一次生效覆盖 Y1/Y2/Y3）。守门 40 与 r 值不动。
+手验行数：old=3，new=5。
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1954,3 +1954,5 @@
+             local.deadline_urgency_scale = 0.0;
+             local.dynamic_special_targets = true;
++            // 丙-1 转正（fanfix 0001）：满位预留罚分默认钳制（行为=旧 preset+rclamp）。
++            local.reserve_clamp = true;
+             LocalRamenTrainer::with_configs(policy, local)
