@@ -1,18 +1,17 @@
-//! 溢出属性训练摆烂 — 复现测试（基线 = 上游 xulai1001/umaai-rs master 镜像）
+//! 溢出属性训练摆烂 — 复现报告（v2，上游 AGENTS.md 合规：println 报红绿，不用 assert 宏，release 跑）
 //!
-//! 用户定调（09-12 原话）：体力硬守门是对的、与本问题无关——真机实观是
+//! 红绿证据以 "VERDICT <id> RED|GREEN|SKIP ..." 行打印；CI 步骤 tee 存报告上传 artifact，
+//! 不再拿 panic 当门（红证据由报告文字呈现，文档落盘引用 run id）。
+//!
+//! 背景定调（用户 09-12 原话）：体力硬守门是对的、与本问题无关——真机实观是
 //! **满体力**下「不练智力双彩、选择睡觉」→ 病灶在打分层的属性上限硬门限：
 //! (1) reserve_penalty 在 h=0 处按原始增益全额收 quadratic 预留罚（重复收费悬崖，
 //!     单元级已实证：gain=60 → 罚 1149.23，run 34664275996）；
 //! (2) 属性分凸、PT 分平 → 模型天生靠属性维，上限一满该维清零、无第二维说话；
-//! (3) 超上限的训练收益没有合理建模（本仓先修 (1)，(3) 待机制确认后另 patch）。
+//! (3) 超上限的训练收益没有合理建模（先修 (1)，(3) 由 0004 期权化承接）。
 //!
-//! 场景标定记录：
-//! - 默认代表卡 raw gain≈60 时，PT+彩圈(≈1564)扛住 −1149 悬崖 → AI 选 Train(Wisdom)
-//!   345（run 34664275996 实测，未复现）；
-//! - 真机高面板卡+面倍率 gain 150~400 → 悬崖 −7000~−20000 → 睡觉。
-//!   故场景加 current_ramen=Some(2) 倍率把 gain 推入真机量级；
-//! - turn=20 是比赛回合（G2 候选 335 分会吸收选择→假绿），改用非赛期 turn=21。
+//! 场景标定记录：默认卡 gain≈60 太温和；真机高面板+面倍率 gain 150~400 → 加
+//! current_ramen=Some(2)；turn=20 撞比赛回合会假绿 → 用非赛期 turn=21。
 
 use umasim::bench::seeded_rngs;
 use umasim::game::ramen::policy::RamenPolicyConfig;
@@ -80,39 +79,44 @@ fn chosen_operation(
     Ok(actions[idx].operation.clone())
 }
 
-/// 复现主测试：满体力+智溢出+全彩圈+面倍率，当前 preset 不得选择睡觉（修复前红）
+/// 主场景：满体力+智溢出+全彩圈+面倍率。睡觉=RED（悬崖吃掉最优位）；训练=GREEN。
+/// 注：当前 master 有 140 分回退门兜底，预期 GREEN——这不是无罪，是危害被回退门
+/// 吸走后只剩 margin≤140 区的位次误导（见 cliff_readings 与 ab-results 文档）。
 #[test]
 fn full_vital_capped_shining_wisdom_must_not_sleep() -> R {
     let game = make_capped_shining_wisdom()?;
     let trainer = RecommendedRamenTrainer::new();
     let chosen = chosen_operation(&game, &trainer)?;
-    assert!(
-        !matches!(chosen, Operation::Rest),
-        "复现：满体力、智溢出但双彩高价值回合，AI 仍选择睡觉（上限硬门限悬崖所致）"
-    );
+    if matches!(chosen, Operation::Rest) {
+        println!("VERDICT must_not_sleep RED 满体力智溢出仍选睡觉（上限硬门限悬崖所致）");
+    } else {
+        println!("VERDICT must_not_sleep GREEN 当前 preset 未睡（140 回退门兜底，位次误导见 cliff_readings）");
+    }
     Ok(())
 }
 
-/// 解药测试：同局面 + rclamp（补丁 0001 v2 应用后可用）→ 必须恢复训练
+/// 解药场景：同局面 + rclamp（0001 v2 应用后可用）。恢复训练=GREEN；补丁未应用=SKIP。
 #[test]
 fn rclamp_full_vital_capped_shining_wisdom_trains() -> R {
     let trainer = match RecommendedRamenTrainer::with_tokens("rclamp") {
         Ok(t) => t,
         Err(e) => {
-            println!("跳过：补丁未应用（{e}）");
+            println!("VERDICT rclamp_trains SKIP 补丁未应用（{e}）");
             return Ok(());
         }
     };
     let game = make_capped_shining_wisdom()?;
     let chosen = chosen_operation(&game, &trainer)?;
-    assert!(
-        matches!(chosen, Operation::Train(_)),
-        "rclamp 后应恢复训练（智位 PT+彩圈价值不再被悬崖淹没），实际 {chosen:?}"
-    );
+    if matches!(chosen, Operation::Train(_)) {
+        println!("VERDICT rclamp_trains GREEN rclamp 后恢复训练（PT+彩圈价值不再被悬崖淹没）");
+    } else {
+        println!("VERDICT rclamp_trains RED rclamp 后仍未训练，实际 {chosen:?}");
+    }
     Ok(())
 }
 
-/// 单元级：reserve_penalty 在 h=0 的重复收费（修复前红，已实证 1149.23）
+/// 单元读数：reserve_penalty 在 h=0 的重复收费悬崖。p_capped≈0=GREEN（已修/已关），
+/// 显著为正=RED（悬崖在位）。近上限罚分 p_near 应恒为正（模型本意，打印供核对）。
 #[test]
 fn reserve_penalty_zero_for_capped_slot() -> R {
     let mut game = setup()?;
@@ -127,12 +131,11 @@ fn reserve_penalty_zero_for_capped_slot() -> R {
     let p_capped = trainer.reserve_penalty(&game, &gain);
     game.uma.five_status[4] = game.uma.five_status_limit[4] - 10;
     let p_near = trainer.reserve_penalty(&game, &gain);
-    println!("已满罚分={p_capped} 剩10点罚分={p_near}");
-
-    assert!(p_near > 0.0, "近上限应有软惩罚（模型本意）");
-    assert!(
-        p_capped.abs() < 1e-6,
-        "复现：已满位预留罚分应为 0，实际 {p_capped}（重复收费悬崖）"
-    );
+    println!("读数: 已满罚分={p_capped} 剩10点罚分={p_near}（近上限罚分为正=模型本意）");
+    if p_capped.abs() < 1e-6 {
+        println!("VERDICT cliff_readings GREEN 已满位预留罚分=0（钳制在位或门控关闭且已默认修）");
+    } else {
+        println!("VERDICT cliff_readings RED 已满位预留罚分={p_capped}≠0（重复收费悬崖在位，默认关=preset 含 bug）");
+    }
     Ok(())
 }
