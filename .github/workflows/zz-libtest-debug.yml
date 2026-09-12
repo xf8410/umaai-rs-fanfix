@@ -1,0 +1,30 @@
+name: libtest-debug
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libdbg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 三制定性（并行debug / 单线程debug / release并行）——只报失败名单与panic
+        run: |
+          summarize() {
+            echo "=== $1 ==="
+            grep -E '\.\.\. FAILED' /tmp/t.log || echo "  (无 FAILED 行)"
+            grep -cE 'panicked at' /tmp/t.log | xargs echo "  panicked-at 行数:"
+            grep -A6 'panicked at' /tmp/t.log | head -c 9000
+            grep -E 'test result' /tmp/t.log
+          }
+          cargo test -p umasim --lib           -- --test-threads=8  > /tmp/t.log 2>&1 || true; summarize "debug 8线程"
+          cargo test -p umasim --lib           -- --test-threads=1  > /tmp/t.log 2>&1 || true; summarize "debug 单线程"
+          cargo test --release -p umasim --lib -- --test-threads=8  > /tmp/t.log 2>&1 || true; summarize "release 8线程"
