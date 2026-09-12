@@ -1,0 +1,34 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0003-c] dynamic_vital 块：分年价格曲线 + 回体力对称计值（单 hunk）
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -994,8 +994,26 @@
+             if self.config.dynamic_vital {
+-                let c = (-val.vital).max(0) as f32;
+-                let z = -c * (Self::vital_factor(g.turn()) - self.policy.config.train_vital_value);
++                let f = if self.config.vital_curve {
++                    let t = g.turn();
++                    if t >= 72 {
++                        0.25
++                    } else if t < 24 {
++                        4.0
++                    } else if t < 48 {
++                        3.5
++                    } else {
++                        2.5
++                    }
++                } else {
++                    Self::vital_factor(g.turn())
++                };
++                let c = if self.config.vital_curve {
++                    -(val.vital as f32)
++                } else {
++                    (-val.vital).max(0) as f32
++                };
++                let z = -c * (f - self.policy.config.train_vital_value);
+                 o.score += z;
+                 if self.policy.collect_details {
+                     o.add("dynamic_vital", z);
+                 }
+             }
