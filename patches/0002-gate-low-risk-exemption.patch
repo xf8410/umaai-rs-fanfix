@@ -11,12 +11,11 @@ Subject: [PATCH 0002] feat(umasim): 体力守门低危豁免——守门查失�
 「折算后失败率 ≤ gate_low_risk_max_fail 且 体力增量 ≥ 0」，则不强制休息，
 交由打分层决定。默认 0.0=关闭（行为与旧版逐位一致）；wisdom_vital_floor
 （EXP-006c 智力位单点豁免）保留为本修复的特例。
-eval 只在已触发低体力的分支内计算，守门未触发时保持惰性（不破坏
-「守门早退不提前计算训练基础值」既有测试契约——该测试用 grf 默认关的路径）。
+eval 只在已触发低体力的分支内计算，守门未触发时保持惰性。
 
 --- a/crates/umasim/src/game/ramen/policy.rs
 +++ b/crates/umasim/src/game/ramen/policy.rs
-@@ -47,6 +47,12 @@
+@@ -45,4 +45,10 @@
      /// 智力训练近乎零风险。`i32::MAX`（默认）= 不豁免，行为与旧版逐位一致。
      pub wisdom_vital_floor: i32,
 +    /// 守门低危豁免（fanfix 0002）：vital < [`vital_rest`](Self::vital_rest) 时，
@@ -27,13 +26,13 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
 +    pub gate_low_risk_max_fail: f32,
      /// 心情低于此值强制外出（回干劲）
      pub motivation_outing: i32,
-@@ -183,6 +189,7 @@
+@@ -186,4 +192,5 @@
              vital_rest: 45,
              vital_rest_eating: 0,
              wisdom_vital_floor: i32::MAX,
 +            gate_low_risk_max_fail: 0.0,
              motivation_outing: 3,
-@@ -316,7 +323,28 @@
+@@ -317,4 +324,24 @@
                  .iter()
                  .any(|a| matches!(&a.operation, Operation::Train(t) if *t as usize == 4));
 -        if uma.vital < rest_threshold && !wisdom_exempt {
@@ -60,7 +59,7 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
              if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -1080,6 +1080,12 @@ impl RecommendedRamenTrainer {
+@@ -1081,4 +1081,10 @@ impl RecommendedRamenTrainer {
                  for year in trainer.years.iter_mut() {
                      year.policy.config.wisdom_vital_floor = floor;
                  }
