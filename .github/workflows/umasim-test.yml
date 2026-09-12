@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: overflow-slack 复现报告（不打补丁，release，VERDICT 行呈现红绿，不拿 panic 当门）
+      - name: overflow-slack 复现报告（不打补丁=上游基线，VERDICT 行呈现红绿；cliff RED=证据墙）
         run: |
           set -o pipefail
           cargo test --release -p umasim --test overflow_slack_repro -- --nocapture 2>&1 | tee repro-report.txt
@@ -34,14 +34,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: 应用 0001 v2 + 0003 拆分件（逐件应用，bash -e 首个失败件即定位）
+      - name: 逐件应用补丁（bash -e 首个失败件即定位；顺序=0001 → 0003a-d → 0004a-d → 0005转正）
         run: |
           git apply --verbose patches/0001-reserve-penalty-clamp.patch
           git apply --verbose patches/0003-a-struct-field.patch
           git apply --verbose patches/0003-b-default-impl.patch
           git apply --verbose patches/0003-c-dynamic-vital.patch
           git apply --verbose patches/0003-d-token.patch
-      - name: 打补丁后复现报告（rclamp 臂应 GREEN、rclamp_trains 生效；release 模式）
+          git apply --verbose patches/0004-a-struct-field.patch
+          git apply --verbose patches/0004-b-default-impl.patch
+          git apply --verbose patches/0004-c-reserve-r.patch
+          git apply --verbose patches/0004-d-token-rera.patch
+          git apply --verbose patches/0005-promote-rclamp.patch
+      - name: 打补丁后复现报告（cliff 应转 GREEN=0005 转正自证；rera 读数 GREEN/SKIP）
         run: |
           set -o pipefail
           cargo test --release -p umasim --test overflow_slack_repro -- --nocapture 2>&1 | tee repro-report.txt
@@ -63,7 +68,12 @@ jobs:
           git apply --verbose patches/0003-b-default-impl.patch
           git apply --verbose patches/0003-c-dynamic-vital.patch
           git apply --verbose patches/0003-d-token.patch
-      - name: A/B bench v8（base/rclamp/vcurve/both/vcurve30 五臂，同种子确定性，release）
+          git apply --verbose patches/0004-a-struct-field.patch
+          git apply --verbose patches/0004-b-default-impl.patch
+          git apply --verbose patches/0004-c-reserve-r.patch
+          git apply --verbose patches/0004-d-token-rera.patch
+          git apply --verbose patches/0005-promote-rclamp.patch
+      - name: A/B bench v9（转正自检 A≡B + vcurve 留档 + F-rera 首测，六臂同种子，release）
         run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
     runs-on: ubuntu-latest
@@ -71,5 +81,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: umasim lib tests (debug)
+      - name: umasim lib tests (debug) —— 上游既有基线红，不背不藏（红线4）
         run: cargo test -p umasim --lib
