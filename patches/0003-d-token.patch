@@ -1,9 +1,12 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0003-d] with_tokens 增 "vcurve" token（单 hunk）
+Subject: [PATCH 0003-d v3] with_tokens 增 "vcurve"/"vcurve30" token（单 hunk）
+
+v3：乙线加 vcurve30（Y3=3.0 对照臂，验证 2.5 是否矫枉过正）。
+手验行数：old=6（全上下文），new=17（6 上下文 + 5 vcurve 块 + 6 vcurve30 块）。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -1120,6 +1120,11 @@
+@@ -1120,6 +1120,17 @@
                  for year in trainer.years.iter_mut() {
                      year.config.power_gap_strength = s;
                  }
@@ -11,6 +14,12 @@ Subject: [PATCH 0003-d] with_tokens 增 "vcurve" token（单 hunk）
 +                // 分年体力曲线 + 回体力对称计值（fanfix 0003）：软化后期体力定价。
 +                for year in trainer.years.iter_mut() {
 +                    year.config.vital_curve = true;
++                }
++            } else if token == "vcurve30" {
++                // 乙对照：同曲线但 Y3=3.0（2.5 版实测整局 −0.34%，测试是否过矫）
++                for year in trainer.years.iter_mut() {
++                    year.config.vital_curve = true;
++                    year.config.vital_curve_years = [4.0, 3.5, 3.0, 0.25];
 +                }
              } else {
                  anyhow::bail!("未知 token: {token}（完整: {tokens}）");
