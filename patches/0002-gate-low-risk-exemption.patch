@@ -1,73 +1,12 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0002] feat(umasim): 体力守门低危豁免——守门查失败率/体力增量，不再只看体力一个数
+Subject: [RETIRED] PATCH 0002 — 体力守门低危豁免（方向作废）
 
-背景（bench v2 归因，140 局）：整局休息 4.08/game 全部来自体力硬守门
-（vital<40 → 强制休息），纯打分选休息≈0。样本实锤守门误杀：
-  turn=13 vital≈29 休息85分，但智训练=583分·失败率5%·体力+5；
-  turn=23 vital≈37 休息62分，但耐训练=525分·失败率20%。
-守门的本意是「防失败率崩盘」，但它只看体力一个代理指标。
+撤回原因（用户 09-12 原话，来源级①）：
+「体力硬守门是对的和这个问题没关系，因为昨天满体力也不练智力双彩选择睡觉，
+改体力硬守门会导致训练失败直接血崩。」
 
-修复（通用化，非回合特判、非比赛回合硬编码）：低体力时若任一训练候选满足
-「折算后失败率 ≤ gate_low_risk_max_fail 且 体力增量 ≥ 0」，则不强制休息，
-交由打分层决定。默认 0.0=关闭（行为与旧版逐位一致）；wisdom_vital_floor
-（EXP-006c 智力位单点豁免）保留为本修复的特例。
-eval 只在已触发低体力的分支内计算，守门未触发时保持惰性。
+守门是正确设计（低体力训练=失败率崩盘），本补丁放宽守门的方向整体作废。
+真机症状在满体力下依然发生 → 病灶在打分层的属性上限硬门限（见 0001 v2 与
+docs/overflow-slack-analysis.md v5），与守门无关。
 
---- a/crates/umasim/src/game/ramen/policy.rs
-+++ b/crates/umasim/src/game/ramen/policy.rs
-@@ -49,4 +49,10 @@
-     /// 智力训练近乎零风险。`i32::MAX`（默认）= 不豁免，行为与旧版逐位一致。
-     pub wisdom_vital_floor: i32,
-+    /// 守门低危豁免（fanfix 0002）：vital < [`vital_rest`](Self::vital_rest) 时，
-+    /// 若任一训练候选满足「折算后失败率 ≤ 本值 且 体力增量 ≥ 0」，则不强制休息，
-+    /// 交由打分层决定（守门本意是防失败率崩盘，就直接查失败率与体力增量，
-+    /// 而不是只看体力一个代理数）。`0.0`（默认）= 关闭，行为与旧版逐位一致。
-+    /// 配置 token `grfN`（N=百分比，如 `grf15`）。
-+    pub gate_low_risk_max_fail: f32,
-     /// 心情低于此值强制外出（经验：<3 训练数值损失大）
-     pub motivation_outing: i32,
-@@ -172,4 +178,5 @@
-             vital_rest: 45,
-             vital_rest_eating: 0,
-             wisdom_vital_floor: i32::MAX,
-+            gate_low_risk_max_fail: 0.0,
-             motivation_outing: 3,
-@@ -377,4 +384,23 @@
-                 .iter()
-                 .any(|a| matches!(&a.operation, Operation::Train(t) if *t as usize == 4));
--        if uma.vital < rest_threshold && !wisdom_exempt {
-+        // 低危豁免（fanfix 0002）：只在已触发低体力的分支内计算候选 eval，
-+        // 命中「低失败率且体力非负」即放行打分层。守门未触发时保持惰性。
-+        let low_risk_exempt = uma.vital < rest_threshold
-+            && self.config.gate_low_risk_max_fail > 0.0
-+            && actions.iter().any(|a| {
-+                if let Operation::Train(t) = a.operation {
-+                    self.eval_train(game, t as usize, ramen).map_or(false, |e| {
-+                        let fr = if self.config.effective_ramen_failure {
-+                            (e.fail_rate * (100.0 - e.ramen_effect.fail_rate_drop as f32) / 100.0)
-+                                .clamp(0.0, 100.0)
-+                        } else {
-+                            e.fail_rate
-+                        };
-+                        fr <= self.config.gate_low_risk_max_fail && e.value.vital >= 0
-+                    })
-+                } else {
-+                    false
-+                }
-+            });
-+        if uma.vital < rest_threshold && !wisdom_exempt && !low_risk_exempt {
-             if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
---- a/crates/umasim/src/trainer/local_ramen_trainer.rs
-+++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -1081,4 +1081,11 @@ impl RecommendedRamenTrainer {
-                 for year in trainer.years.iter_mut() {
-                     year.policy.config.wisdom_vital_floor = floor;
-                 }
-+            } else if let Some(v) = token.strip_prefix("grf") {
-+                // 守门低危豁免阈值（fanfix 0002）：grf15 → 失败率≤15% 且体力非负的训练位
-+                // 可豁免体力硬守门，交给打分层决定。
-+                let s: f32 = v.parse()?;
-+                for year in trainer.years.iter_mut() {
-+                    year.policy.config.gate_low_risk_max_fail = s;
-+                }
-             } else if let Some(v) = token.strip_prefix("capd") {
+本文件保留作决策记录，不再被 CI 应用。
