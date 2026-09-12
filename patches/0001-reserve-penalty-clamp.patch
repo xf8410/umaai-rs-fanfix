@@ -3,10 +3,10 @@ Subject: [PATCH 0001 v2] feat(umasim): reserve_penalty 上限钳制（配置门�
 
 用户定调（09-12 原话，来源级①）：「手写逻辑的属性上限硬门限有问题，得软化。」
 
-根因：属性已满（h=0）时游戏截断增益、属性不动，但 reserve_penalty 仍按原始 gain
-记「预留空间被侵占」：罚分 = 6×(gain + gain²/2r)。满体力+主位溢出+高彩圈+等级5
-（gain≈200, turn≈30, r≈24）时罚 ≈ −6200，淹没该位仅剩的 PT+彩圈价值（≈+2200），
-净负四五千 → 休息(20分)躺赢 → 「满体力也不练智、双彩选睡觉」（用户真机实观）。
+根因（CI 单元级实证，run 34664275996）：属性已满（h=0）时游戏截断增益、属性不动，
+但 reserve_penalty 仍按原始 gain 记「预留空间被侵占」：罚分 = 6×(gain + gain²/2r)。
+实测 gain=60/turn=50 → 罚 1149.23；真机高面板卡原始增益 150~400 → 罚 7000~20000，
+淹没该位仅剩的 PT+彩圈价值 → 休息躺赢 → 「满体力也不练智、双彩选睡觉」。
 溢出浪费已由 status_gain 截断计价一次，此处为重复收费=上限处的人为悬崖。
 
 修复（软化，非回合特判）：钳制计入惩罚的增益 ≤ 剩余空间 h。
@@ -16,7 +16,7 @@ with_tokens("rclamp") 开启；A/B 验证后再定 preset 默认值。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -325,5 +325,10 @@
+@@ -325,5 +325,9 @@
      /// RMJ/第三年5000目标在截止前的可达性紧迫度。
      pub deadline_urgency_scale: f32,
 +
@@ -26,18 +26,18 @@ with_tokens("rclamp") 开启；A/B 验证后再定 preset 默认值。
  
      /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
      pub dynamic_special_targets: bool
-@@ -372,2 +377,3 @@
+@@ -372,2 +376,3 @@
              deadline_urgency_scale: 0.0,
 +            reserve_clamp: false,
              dynamic_special_targets: false
-@@ -596,4 +602,5 @@
+@@ -596,4 +601,5 @@
              let h = (g.uma.five_status_limit[i] - g.uma.five_status[i]).max(0) as f32;
              let b = (r - h).max(0.);
 -            let a = (r - (h - gain[i] as f32)).max(0.);
 +            let eff = if self.config.reserve_clamp { (gain[i] as f32).min(h) } else { gain[i] as f32 };
 +            let a = (r - (h - eff)).max(0.);
              p += (a * a - b * b) / (2. * r.max(1.));
-@@ -1081,6 +1088,11 @@ impl RecommendedRamenTrainer {
+@@ -1081,6 +1087,11 @@ impl RecommendedRamenTrainer {
              } else if let Some(v) = token.strip_prefix("wisf") {
                  let floor: i32 = v.parse()?;
                  for year in trainer.years.iter_mut() {
