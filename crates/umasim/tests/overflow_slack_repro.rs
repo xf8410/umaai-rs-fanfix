@@ -58,11 +58,18 @@ fn make_capped_shining_wisdom() -> Result<RamenGame, Box<dyn std::error::Error>>
     Ok(game)
 }
 
-fn chosen_operation(game: &RamenGame, trainer: &RecommendedRamenTrainer) -> Result<Operation, Box<dyn std::error::Error>> {
+fn chosen_operation(
+    game: &RamenGame,
+    trainer: &RecommendedRamenTrainer,
+) -> Result<Operation, Box<dyn std::error::Error>> {
     let (mut rng, _rm) = seeded_rngs(61444, 0);
     let actions = game.list_actions()?;
     let idx = trainer.select_action(game, &actions, &mut rng)?;
-    println!("选择: {} | breakdown: {:?}", actions[idx].operation, trainer.last_breakdown());
+    println!(
+        "选择: {:?} | breakdown: {:?}",
+        actions[idx].operation,
+        trainer.last_breakdown()
+    );
     Ok(actions[idx].operation.clone())
 }
 
