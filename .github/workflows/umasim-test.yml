@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# 同分支新提交直接取消旧 run，防多 commit 拆分推送堆队列
+concurrency:
+  group: umasim-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   repro:
     runs-on: ubuntu-latest
@@ -22,10 +27,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: 应用 0001 v2 + 0003 v1（配置门控，默认逐位不变）
+      - name: 应用 0001 v2 + 0003 拆分件（逐件应用，bash -e 首个失败件即定位）
         run: |
           git apply --verbose patches/0001-reserve-penalty-clamp.patch
-          git apply --verbose patches/0003-vital-year-curve.patch
+          git apply --verbose patches/0003-a-struct-field.patch
+          git apply --verbose patches/0003-b-default-impl.patch
+          git apply --verbose patches/0003-c-dynamic-vital.patch
+          git apply --verbose patches/0003-d-token.patch
       - name: 打补丁后 repro（rclamp 臂必须绿；主臂仍红直到 preset 采纳）
         run: cargo test -p umasim --test overflow_slack_repro -- --nocapture
   bench:
@@ -34,10 +42,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: 应用 0001 v2 + 0003 v1（运行期，不提交回分支）
+      - name: 应用补丁（运行期，逐件定位失败半径）
         run: |
           git apply --verbose patches/0001-reserve-penalty-clamp.patch
-          git apply --verbose patches/0003-vital-year-curve.patch
+          git apply --verbose patches/0003-a-struct-field.patch
+          git apply --verbose patches/0003-b-default-impl.patch
+          git apply --verbose patches/0003-c-dynamic-vital.patch
+          git apply --verbose patches/0003-d-token.patch
       - name: A/B bench v7（base/rclamp/vcurve/both 四臂，同种子确定性）
         run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
