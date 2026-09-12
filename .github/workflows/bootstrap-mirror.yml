@@ -1,0 +1,22 @@
+name: bootstrap-mirror
+# 一次性仓库引导：把上游 xulai1001/umaai-rs master 原样镜像进本仓 master 分支。
+# 只复制仓库内容，不生成/修改任何源码（与"CI 打补丁改源码"红线无关）。
+# 用途：Agent 工具无法 bulk-push，用此 workflow 建立可编译基线；跑一次后即删除本文件。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone upstream and push to this repo's master
+        run: |
+          git clone --depth 1 --branch master https://github.com/xulai1001/umaai-rs.git src
+          cd src
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin master:master --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
