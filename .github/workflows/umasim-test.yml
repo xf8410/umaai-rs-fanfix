@@ -19,8 +19,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: overflow-slack repro（不打补丁：满体力睡觉复现红=bug在案；rclamp 臂自动跳过）
-        run: cargo test -p umasim --test overflow_slack_repro -- --nocapture
+      - name: overflow-slack 复现报告（不打补丁，release，VERDICT 行呈现红绿，不拿 panic 当门）
+        run: |
+          set -o pipefail
+          cargo test --release -p umasim --test overflow_slack_repro -- --nocapture 2>&1 | tee repro-report.txt
+      - name: 上传复现报告（基线）
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-report-base
+          path: repro-report.txt
   repro-patched:
     runs-on: ubuntu-latest
     steps:
@@ -34,8 +41,15 @@ jobs:
           git apply --verbose patches/0003-b-default-impl.patch
           git apply --verbose patches/0003-c-dynamic-vital.patch
           git apply --verbose patches/0003-d-token.patch
-      - name: 打补丁后 repro（rclamp 臂必须绿；主臂仍红直到 preset 采纳）
-        run: cargo test -p umasim --test overflow_slack_repro -- --nocapture
+      - name: 打补丁后复现报告（rclamp 臂应 GREEN、rclamp_trains 生效；release 模式）
+        run: |
+          set -o pipefail
+          cargo test --release -p umasim --test overflow_slack_repro -- --nocapture 2>&1 | tee repro-report.txt
+      - name: 上传复现报告（补丁后）
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-report-patched
+          path: repro-report.txt
   bench:
     runs-on: ubuntu-latest
     steps:
@@ -49,7 +63,7 @@ jobs:
           git apply --verbose patches/0003-b-default-impl.patch
           git apply --verbose patches/0003-c-dynamic-vital.patch
           git apply --verbose patches/0003-d-token.patch
-      - name: A/B bench v7（base/rclamp/vcurve/both 四臂，同种子确定性）
+      - name: A/B bench v8（base/rclamp/vcurve/both/vcurve30 五臂，同种子确定性，release）
         run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
     runs-on: ubuntu-latest
