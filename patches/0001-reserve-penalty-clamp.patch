@@ -16,26 +16,27 @@ with_tokens("rclamp") 开启；A/B 验证后再定 preset 默认值。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -325,4 +325,6 @@
+@@ -325,5 +325,9 @@
      /// RMJ/第三年5000目标在截止前的可达性紧迫度。
      pub deadline_urgency_scale: f32,
 +    /// 上限钳制（fanfix 0001 v2）：reserve_penalty 计入惩罚的增益钳制到剩余空间 h
 +    /// （属性已满→罚 0；gain≤h 逐位不变）。`false`（默认）= 旧行为逐位保留。
 +    pub reserve_clamp: bool,
++
      /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
      pub dynamic_special_targets: bool
-@@ -372,2 +374,3 @@
+@@ -372,2 +376,3 @@
              deadline_urgency_scale: 0.0,
 +            reserve_clamp: false,
              dynamic_special_targets: false
-@@ -596,5 +599,6 @@
+@@ -596,4 +601,5 @@
              let h = (g.uma.five_status_limit[i] - g.uma.five_status[i]).max(0) as f32;
              let b = (r - h).max(0.);
 -            let a = (r - (h - gain[i] as f32)).max(0.);
 +            let eff = if self.config.reserve_clamp { (gain[i] as f32).min(h) } else { gain[i] as f32 };
 +            let a = (r - (h - eff)).max(0.);
              p += (a * a - b * b) / (2. * r.max(1.));
-@@ -1081,6 +1085,11 @@ impl RecommendedRamenTrainer {
+@@ -1081,6 +1087,11 @@ impl RecommendedRamenTrainer {
              } else if let Some(v) = token.strip_prefix("wisf") {
                  let floor: i32 = v.parse()?;
                  for year in trainer.years.iter_mut() {
