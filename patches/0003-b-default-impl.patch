@@ -1,0 +1,10 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0003-b] Default impl 补 vital_curve: false（单 hunk）
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -379,2 +379,3 @@
+-            dynamic_special_targets: false
++            dynamic_special_targets: false,
++            vital_curve: false
+         }
