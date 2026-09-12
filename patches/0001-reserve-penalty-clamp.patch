@@ -1,0 +1,39 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH] fix(umasim): reserve_penalty 对已满属性位重复收费导致训练摆烂
+
+症状（小黑板已知问题）：属性溢出时 AI 不训练、选择休息（例：溢出智时）。
+
+根因：`LocalRamenTrainer::reserve_penalty` 把「原始训练增益」全额记为
+预留空间侵占。属性已满（h=0）时游戏会截断增益、属性实际不动，
+但公式仍按 gain 收费：罚分 = 6×(gain + gain²/2r)。
+turn=50（r≈13.7）、gain=60 时罚 ≈1149 分，淹没已满位仅剩的 PT 价值
+（preset pt_rate=64 下也仅 8×64=512），把该位训练打成深度负分；
+叠加 cap_discount_weight=1.0 把副属性差分清零后，溢出位评分系统性崩坏，
+AI 被推向休息/比赛。溢出浪费已由 `status_gain` 截断计价一次，此处为重复收费。
+
+实证：crates/umasim/tests/overflow_slack_repro.rs::reserve_penalty_zero_for_capped_slot
+在修复前红（实测罚分 1149.23，期望 0），修复后绿。
+
+修复：把计入惩罚的增益钳制到剩余空间 h（h=0 → 罚分 0；gain≤h 时行为逐位不变，
+只影响「训练会溢出」的分支）。负增益（释放空间）语义保持不变。
+
+影响面：仅策略评分层（preset status_reserve_max=40 时生效；default 0=关闭不受影响）。
+改变决策轨迹 → 拉面基线作废（上游惯例，需重抓快照）。
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -466,7 +466,11 @@ impl LocalRamenTrainer {
+         let mut p = 0.;
+         for i in 0..5 {
+             let h = (g.uma.five_status_limit[i] - g.uma.five_status[i]).max(0) as f32;
+             let b = (r - h).max(0.);
+-            let a = (r - (h - gain[i] as f32)).max(0.);
++            // 增益超过剩余空间的部分会被游戏截断：属性不动、无空间可侵占，
++            // 溢出浪费已由 status_gain 截断计价一次，此处不得重复收费。
++            // h=0（已满）→ eff=0 → 罚分 0；gain<=h 时与原式逐位一致；
++            // 负增益（释放空间）不受钳制影响（min 取负值本身）。
++            let eff = (gain[i] as f32).min(h);
++            let a = (r - (h - eff)).max(0.);
+             p += (a * a - b * b) / (2. * r.max(1.));
+         }
+         p * 6.
