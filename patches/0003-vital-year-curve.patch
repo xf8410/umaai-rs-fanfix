@@ -1,5 +1,5 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0003 v1] feat(umasim): 体力按年降价曲线 + 训练回体力对称计值（配置门控 vcurve，默认关逐位不变）
+Subject: [PATCH 0003 v2] feat(umasim): 体力按年降价曲线 + 训练回体力对称计值（配置门控 vcurve，默认关逐位不变）
 
 用户定调（09-12 原话）：「体力门限40不能再低了 会导致训练失败，但可能是体力收益判高了，
 尤其是第三年大量用友人和100%减失败率的情况下可能需要一个按年份变化的体力价值。」
@@ -18,21 +18,25 @@ vital_factor = 3.5 + turn/72×2（URA 前）——**越到后期体力越贵**�
 with_tokens("vcurve") 开启；A/B 验证后再定 preset 默认值（bench v7 四臂：base/rclamp/vcurve/both）。
 本 patch 各 hunk 与 0001 正交（struct/Default 尾部、dynamic_vital 块、pg token 块后），可顺序应用。
 
+v2：hunk#1 给 dynamic_special_targets 补尾逗号（struct 末字段无逗号，插新字段必须先补——
+CI run 34668130162 E0585→E0689 级联的根因）。
+
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -330,2 +330,6 @@
-     pub dynamic_special_targets: bool
+@@ -330,2 +330,7 @@
+-    pub dynamic_special_targets: bool
++    pub dynamic_special_targets: bool,
 +
 +    /// 分年体力曲线（fanfix 0003）：vital_factor 按年阶梯下降（Y1 4.0/Y2 3.5/Y3 2.5/URA 0.25）
 +    /// 并对训练回体力对称计值（现行把 +vital 吞成 0）。`false`（默认）= 旧行为逐位保留。
 +    pub vital_curve: bool
  }
-@@ -379,2 +383,3 @@
+@@ -379,2 +384,3 @@
 -            dynamic_special_targets: false
 +            dynamic_special_targets: false,
 +            vital_curve: false
          }
-@@ -994,8 +999,26 @@
+@@ -994,8 +1000,26 @@
              if self.config.dynamic_vital {
 -                let c = (-val.vital).max(0) as f32;
 -                let z = -c * (Self::vital_factor(g.turn()) - self.policy.config.train_vital_value);
@@ -61,7 +65,7 @@ with_tokens("vcurve") 开启；A/B 验证后再定 preset 默认值（bench v7 �
                      o.add("dynamic_vital", z);
                  }
              }
-@@ -1120,6 +1143,11 @@
+@@ -1120,6 +1144,11 @@
                  for year in trainer.years.iter_mut() {
                      year.config.power_gap_strength = s;
                  }
