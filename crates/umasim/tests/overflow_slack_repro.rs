@@ -2,12 +2,15 @@
 //!
 //! 用户定调（09-12 原话）：体力硬守门是对的、与本问题无关——真机实观是
 //! **满体力**下「不练智力双彩、选择睡觉」→ 病灶在打分层的属性上限硬门限：
-//! (1) reserve_penalty 在 h=0 处按原始增益全额收 quadratic 预留罚（重复收费悬崖）；
+//! (1) reserve_penalty 在 h=0 处按原始增益全额收 quadratic 预留罚（重复收费悬崖，
+//!     单元级已实证：gain=60 → 罚 1149.23，run 34664275996）；
 //! (2) 属性分凸、PT 分平 → 模型天生靠属性维，上限一满该维清零、无第二维说话；
 //! (3) 超上限的训练收益没有合理建模（本仓先修 (1)，(3) 待机制确认后另 patch）。
 //!
-//! 修复前预期红（复现），修复后（preset 采纳 rclamp）转绿。
-//! 注：集成测试 crate 只能引用 umasim 公开面；RNG 经 umasim::bench::seeded_rngs。
+//! 场景标定记录：默认代表卡 raw gain≈60 时 PT+彩圈(≈1564)还能扛住 −1149 悬崖
+//! （AI 选 Train(Wisdom) 345，run 34664275996 实测）；真机高面板卡+面倍率
+//! gain 150~400 → 悬崖 −7000~−20000 → 睡觉。故场景加 current_ramen 倍率把
+//! gain 推入真机量级。
 
 use umasim::bench::seeded_rngs;
 use umasim::game::ramen::policy::RamenPolicyConfig;
@@ -33,7 +36,8 @@ fn setup() -> Result<RamenGame, Box<dyn std::error::Error>> {
     Ok(RamenGame::newgame(102601, &DECK, inherit)?)
 }
 
-/// 真机场景复刻：满体力、智已满（其余四维 90%）、全部训练卡集中在智位且满绊（双彩以上）
+/// 真机场景复刻：满体力、智已满（其余四维 90%）、全卡集中智位满绊（双彩以上）、
+/// 且处于吃面倍率窗口（把 raw gain 推入真机高面板量级，见文件头标定记录）
 fn make_capped_shining_wisdom() -> Result<RamenGame, Box<dyn std::error::Error>> {
     let mut game = setup()?;
     game.base.turn = 20; // 第一年（pt_rate=16，属性维崩塌后 PT 更撑不起来）
@@ -55,6 +59,7 @@ fn make_capped_shining_wisdom() -> Result<RamenGame, Box<dyn std::error::Error>>
     game.uma.five_status[4] = game.uma.five_status_limit[4]; // 智溢出
     game.uma.vital = 100; // 满体力——与守门无关
     game.uma.motivation = 5;
+    game.ramen.current_ramen = Some(2); // 面倍率窗口：真机溢出睡觉多发生于此
     Ok(game)
 }
 
@@ -73,7 +78,7 @@ fn chosen_operation(
     Ok(actions[idx].operation.clone())
 }
 
-/// 复现主测试：满体力+智溢出+全彩圈，当前 preset 不得选择睡觉（修复前红）
+/// 复现主测试：满体力+智溢出+全彩圈+面倍率，当前 preset 不得选择睡觉（修复前红）
 #[test]
 fn full_vital_capped_shining_wisdom_must_not_sleep() -> R {
     let game = make_capped_shining_wisdom()?;
@@ -100,12 +105,12 @@ fn rclamp_full_vital_capped_shining_wisdom_trains() -> R {
     let chosen = chosen_operation(&game, &trainer)?;
     assert!(
         matches!(chosen, Operation::Train(_)),
-        "rclamp 后应恢复训练（智位 PT+彩圈价值不再被 −6000 级悬崖淹没），实际 {chosen:?}"
+        "rclamp 后应恢复训练（智位 PT+彩圈价值不再被悬崖淹没），实际 {chosen:?}"
     );
     Ok(())
 }
 
-/// 守门测试：reserve_penalty 在 h=0 的重复收费（单元级，修复前红）
+/// 单元级：reserve_penalty 在 h=0 的重复收费（修复前红，已实证 1149.23）
 #[test]
 fn reserve_penalty_zero_for_capped_slot() -> R {
     let mut game = setup()?;
