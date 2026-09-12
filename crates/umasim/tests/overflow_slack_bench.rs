@@ -1,6 +1,7 @@
-//! 溢出摆烂 A/B 整局基准 v5 —— 守门方向作废（用户判定：守门是对的），只测上限软化
+//! 溢出摆烂 A/B 整局基准 v6 —— 守门方向作废（用户判定：守门是对的），只测上限软化
 //!
-//! 臂 A = preset 原样（上限硬门限悬崖在位）
+//! 臂 A = preset 原样（上限硬门限悬崖在位）——token 用 "base"（上游 with_tokens
+//!       对未知/空 token 严格报错，"" 会被拒；"base" 是官方无覆盖对照名）。
 //! 臂 B = rclamp（patch 0001 v2：预留罚分钳制到剩余空间；CI 应用补丁后此臂激活，否则跳过）
 //! 计量：train/game、rests/game（守门标/守门anon/打分）、自选比赛、终局分。
 
@@ -53,7 +54,9 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 2] = [("A-preset", ""), ("B-rclamp", "rclamp")];
+    // 注意：with_tokens 对未知 token 严格报错（上游防拼错静默跑成 base 的约定），
+    // 空串不是合法 token——对照臂必须用官方名 "base"。
+    let arm_defs: [(&str, &str); 2] = [("A-preset", "base"), ("B-rclamp", "rclamp")];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
 
@@ -68,7 +71,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                 let trainer = match RecommendedRamenTrainer::with_tokens(tokens) {
                     Ok(t) => t,
                     Err(e) => {
-                        println!("跳过臂 {name}: {e}");
+                        println!("跳过臂 {name}（token={tokens:?}）: {e}");
                         skipped.push(name);
                         continue;
                     }
@@ -122,7 +125,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n===== 上限软化 A/B（{RUNS} 局/build）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
-            println!("{name}: 跳过（补丁未应用）");
+            println!("{name}: 跳过（构造失败，见上方日志）");
             continue;
         }
         let g = a.games as f64;
