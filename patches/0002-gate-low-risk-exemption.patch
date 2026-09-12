@@ -32,7 +32,7 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
              wisdom_vital_floor: i32::MAX,
 +            gate_low_risk_max_fail: 0.0,
              motivation_outing: 3,
-@@ -317,4 +324,24 @@
+@@ -317,4 +324,22 @@
                  .iter()
                  .any(|a| matches!(&a.operation, Operation::Train(t) if *t as usize == 4));
 -        if uma.vital < rest_threshold && !wisdom_exempt {
