@@ -1,9 +1,10 @@
-//! 溢出摆烂 A/B 整局基准 v7 —— 四臂：上限软化 × 体力曲线正交验证
+//! 溢出摆烂 A/B 整局基准 v8 —— 五臂：上限软化 × 体力曲线 × 乙对照（Y3=3.0）
 //!
 //! 臂 A = base（preset 原样，官方对照 token；"" 会被上游严格校验拒绝）
 //! 臂 B = rclamp（patch 0001 v2：预留罚分钳制；CI 未应用补丁时此臂自动跳过）
-//! 臂 C = vcurve（patch 0003 v1：分年体力曲线 Y1 4.0/Y2 3.5/Y3 2.5 + 回体力对称计值）
-//! 臂 D = rclamp-vcurve（both，验证两修复正交、无叠加劣化）
+//! 臂 C = vcurve（0003 默认表 Y1 4.0/Y2 3.5/Y3 2.5 + 回体力对称计值）
+//! 臂 D = rclamp-vcurve（both，正交验证）
+//! 臂 E = vcurve30（乙线：同机制但 Y3=3.0，验证 2.5 是否矫枉过正）
 //! 计量：train/game、rests/game（守门标/守门anon/打分）、自选比赛、终局分。
 //! 验收重点（ab-results-rclamp.md 教训）：整局分对 margin 级修复不敏感，
 //! 盯「打分休息数、train/game、自选赛数」行为列。
@@ -57,11 +58,12 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 4] = [
+    let arm_defs: [(&str, &str); 5] = [
         ("A-preset", "base"),
         ("B-rclamp", "rclamp"),
         ("C-vcurve", "vcurve"),
         ("D-both", "rclamp-vcurve"),
+        ("E-vcurve30", "vcurve30"),
     ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
@@ -128,7 +130,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 上限软化 × 体力曲线 A/B（{RUNS} 局/build × 4 臂）=====");
+    println!("\n===== 上限软化 × 体力曲线 × 乙对照 A/B（{RUNS} 局/build × 5 臂）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
             println!("{name}: 跳过（构造失败，见上方日志）");
