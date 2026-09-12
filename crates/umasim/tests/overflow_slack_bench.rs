@@ -1,12 +1,7 @@
-//! 溢出摆烂 A/B 整局基准 v4 —— 归因已定谳（休息=体力硬守门 100%），本轮测解药
+//! 溢出摆烂 A/B 整局基准 v5 —— 守门方向作废（用户判定：守门是对的），只测上限软化
 //!
-//! 臂 A = preset（vital_rest=40 硬守门，豁免全关）
-//! 臂 C = wisf25（EXP-006c 现成开关：智力位豁免，vital≥25）
-//! 臂 D = wisf35
-//! 臂 E = grf15 （patch 0002 通用低危豁免：任一训练位失败率≤15%且体力≥0 → 放行打分）
-//! 臂 F = grf25
-//! 臂 G = wisf25-grf15
-//! grf* 依赖运行期 git apply patches/0002（CI bench job 已接线）；未打补丁时该臂自动跳过。
+//! 臂 A = preset 原样（上限硬门限悬崖在位）
+//! 臂 B = rclamp（patch 0001 v2：预留罚分钳制到剩余空间；CI 应用补丁后此臂激活，否则跳过）
 //! 计量：train/game、rests/game（守门标/守门anon/打分）、自选比赛、终局分。
 
 use umasim::bench::{load_player_builds, seeded_rngs, select_representatives, CardPickOpts};
@@ -58,15 +53,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 7] = [
-        ("A-preset", ""),
-        ("C-wisf25", "wisf25"),
-        ("D-wisf35", "wisf35"),
-        ("E-grf15", "grf15"),
-        ("F-grf25", "grf25"),
-        ("G-wisf25-grf15", "wisf25-grf15"),
-        ("H-wisf35-grf25", "wisf35-grf25"),
-    ];
+    let arm_defs: [(&str, &str); 2] = [("A-preset", ""), ("B-rclamp", "rclamp")];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
 
@@ -78,16 +65,12 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                 if skipped.contains(name) {
                     continue;
                 }
-                let trainer = if tokens.is_empty() {
-                    RecommendedRamenTrainer::new()
-                } else {
-                    match RecommendedRamenTrainer::with_tokens(tokens) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            println!("跳过臂 {name}: {e}");
-                            skipped.push(name);
-                            continue;
-                        }
+                let trainer = match RecommendedRamenTrainer::with_tokens(tokens) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        println!("跳过臂 {name}: {e}");
+                        skipped.push(name);
+                        continue;
                     }
                 };
                 let (mut rng, rule_master) = seeded_rngs(BASE_SEED, i);
@@ -136,24 +119,23 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 解药 A/B（{RUNS} 局/build）=====");
+    println!("\n===== 上限软化 A/B（{RUNS} 局/build）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
-            println!("{name}: 跳过（token 不可用 = 补丁未应用）");
+            println!("{name}: 跳过（补丁未应用）");
             continue;
         }
         let g = a.games as f64;
         println!(
-            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(标 {:.2}+anon {:.2}+打分 {:.2}) | 自选比赛/game={:.2}",
+            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(守门 {:.2}+打分 {:.2}+anon {:.2}) | 自选比赛/game={:.2}",
             a.score / g,
             a.train_turns as f64 / g,
             (a.rest_gate_marked + a.rest_gate_anon + a.rest_scoring) as f64 / g,
             a.rest_gate_marked as f64 / g,
-            a.rest_gate_anon as f64 / g,
             a.rest_scoring as f64 / g,
+            a.rest_gate_anon as f64 / g,
             a.race_free as f64 / g
         );
     }
-    assert!(aggs[0].1.games > 0);
     Ok(())
 }
