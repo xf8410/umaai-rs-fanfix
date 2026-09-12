@@ -15,7 +15,7 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
 
 --- a/crates/umasim/src/game/ramen/policy.rs
 +++ b/crates/umasim/src/game/ramen/policy.rs
-@@ -45,4 +45,10 @@
+@@ -49,4 +49,10 @@
      /// 智力训练近乎零风险。`i32::MAX`（默认）= 不豁免，行为与旧版逐位一致。
      pub wisdom_vital_floor: i32,
 +    /// 守门低危豁免（fanfix 0002）：vital < [`vital_rest`](Self::vital_rest) 时，
@@ -24,15 +24,15 @@ eval 只在已触发低体力的分支内计算，守门未触发时保持惰性
 +    /// 而不是只看体力一个代理数）。`0.0`（默认）= 关闭，行为与旧版逐位一致。
 +    /// 配置 token `grfN`（N=百分比，如 `grf15`）。
 +    pub gate_low_risk_max_fail: f32,
-     /// 心情低于此值强制外出（回干劲）
+     /// 心情低于此值强制外出（经验：<3 训练数值损失大）
      pub motivation_outing: i32,
-@@ -186,4 +192,5 @@
+@@ -172,4 +178,5 @@
              vital_rest: 45,
              vital_rest_eating: 0,
              wisdom_vital_floor: i32::MAX,
 +            gate_low_risk_max_fail: 0.0,
              motivation_outing: 3,
-@@ -317,4 +324,23 @@
+@@ -377,4 +384,23 @@
                  .iter()
                  .any(|a| matches!(&a.operation, Operation::Train(t) if *t as usize == 4));
 -        if uma.vital < rest_threshold && !wisdom_exempt {
