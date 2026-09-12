@@ -1,0 +1,26 @@
+name: umasim-test
+on:
+  push:
+    branches: ["workbench/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: overflow-slack repro（修复前预期为红 = 复现成功）
+        run: cargo test -p umasim --test overflow_slack_repro -- --nocapture
+  libtests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: umasim lib tests (debug)
+        run: cargo test -p umasim --lib
