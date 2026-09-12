@@ -7,18 +7,24 @@
 //! 溢出浪费已由 `status_gain` 截断计价一次，此处属重复收费。
 //!
 //! 本文件在修复前预期为红（复现），修复后应全绿。
+//! 注：集成测试 crate 只能引用 umasim 公开面（不直接引 anyhow/rand），
+//! RNG 经 `umasim::bench::seeded_rngs` 取得。
 
-use rand::{SeedRng, SeedableRng, prelude::StdRng};
+use umasim::bench::seeded_rngs;
 use umasim::game::ramen::policy::RamenPolicyConfig;
 use umasim::game::ramen::{Operation, RamenGame, RamenStage};
 use umasim::game::{Game, InheritInfo, Trainer};
 use umasim::gamedata::init_global;
-use umasim::trainer::local_ramen_trainer::{LocalRamenConfig, LocalRamenTrainer, RecommendedRamenTrainer};
+use umasim::trainer::local_ramen_trainer::{
+    LocalRamenConfig, LocalRamenTrainer, RecommendedRamenTrainer,
+};
 use umasim::utils::get_workspace_root;
+
+type R = Result<(), Box<dyn std::error::Error>>;
 
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 
-fn setup() -> anyhow::Result<RamenGame> {
+fn setup() -> Result<RamenGame, Box<dyn std::error::Error>> {
     std::env::set_current_dir(get_workspace_root()?)?;
     let _ = init_global();
     let inherit = InheritInfo {
@@ -30,7 +36,7 @@ fn setup() -> anyhow::Result<RamenGame> {
 
 /// 守门测试：属性已满的训练位，预留罚分必须为 0（增益被游戏截断，无空间可侵占）
 #[test]
-fn reserve_penalty_zero_for_capped_slot() -> anyhow::Result<()> {
+fn reserve_penalty_zero_for_capped_slot() -> R {
     let mut game = setup()?;
     game.base.turn = 50;
     game.uma.five_status[4] = game.uma.five_status_limit[4]; // 智已满
@@ -59,7 +65,7 @@ fn reserve_penalty_zero_for_capped_slot() -> anyhow::Result<()> {
 /// 症状测试：智已满、其余四维均在 50%（远未溢出）、体力充足时，
 /// 生产 preset 不得选择休息——应继续训练（其他位或吃 PT）。
 #[test]
-fn capped_wisdom_with_healthy_vital_must_not_rest() -> anyhow::Result<()> {
+fn capped_wisdom_with_healthy_vital_must_not_rest() -> R {
     let mut game = setup()?;
     game.base.turn = 50; // 第三年
     game.stage = RamenStage::Train;
@@ -70,7 +76,7 @@ fn capped_wisdom_with_healthy_vital_must_not_rest() -> anyhow::Result<()> {
     game.uma.motivation = 5;
 
     let trainer = RecommendedRamenTrainer::new();
-    let mut rng = StdRng::seed_from_u64(61444);
+    let (mut rng, _rule_master) = seeded_rngs(61444, 0);
     let mut failures = Vec::new();
 
     for vital in [80, 70, 60, 50, 45, 42] {
@@ -94,7 +100,7 @@ fn capped_wisdom_with_healthy_vital_must_not_rest() -> anyhow::Result<()> {
 
 /// 对照测试：智未溢出时同样局面必须训练（证明症状场景不是天然休息局）
 #[test]
-fn uncapped_wisdom_baseline_trains() -> anyhow::Result<()> {
+fn uncapped_wisdom_baseline_trains() -> R {
     let mut game = setup()?;
     game.base.turn = 50;
     game.stage = RamenStage::Train;
@@ -105,7 +111,7 @@ fn uncapped_wisdom_baseline_trains() -> anyhow::Result<()> {
     game.uma.vital = 70;
 
     let trainer = RecommendedRamenTrainer::new();
-    let mut rng = StdRng::seed_from_u64(61444);
+    let (mut rng, _rule_master) = seeded_rngs(61444, 0);
     let actions = game.list_actions()?;
     let idx = trainer.select_action(&game, &actions, &mut rng)?;
     let chosen = actions[idx].operation.clone();
