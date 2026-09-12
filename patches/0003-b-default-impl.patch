@@ -1,10 +1,13 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0003-b] Default impl 补 vital_curve: false（单 hunk）
+Subject: [PATCH 0003-b v2] Default impl 补 vital_curve + 价格表默认值（单 hunk）
+
+手验行数：old=2（1 删 + 1 ctx），new=4（3 增 + 1 ctx）。默认表即 2.5 版阶梯，逐位不变承诺仅由 vital_curve=false 把关。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -379,2 +379,3 @@
+@@ -379,2 +379,4 @@
 -            dynamic_special_targets: false
 +            dynamic_special_targets: false,
-+            vital_curve: false
++            vital_curve: false,
++            vital_curve_years: [4.0, 3.5, 2.5, 0.25]
          }
