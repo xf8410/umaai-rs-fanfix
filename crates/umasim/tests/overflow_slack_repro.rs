@@ -7,10 +7,12 @@
 //! (2) 属性分凸、PT 分平 → 模型天生靠属性维，上限一满该维清零、无第二维说话；
 //! (3) 超上限的训练收益没有合理建模（本仓先修 (1)，(3) 待机制确认后另 patch）。
 //!
-//! 场景标定记录：默认代表卡 raw gain≈60 时 PT+彩圈(≈1564)还能扛住 −1149 悬崖
-//! （AI 选 Train(Wisdom) 345，run 34664275996 实测）；真机高面板卡+面倍率
-//! gain 150~400 → 悬崖 −7000~−20000 → 睡觉。故场景加 current_ramen 倍率把
-//! gain 推入真机量级。
+//! 场景标定记录：
+//! - 默认代表卡 raw gain≈60 时，PT+彩圈(≈1564)扛住 −1149 悬崖 → AI 选 Train(Wisdom)
+//!   345（run 34664275996 实测，未复现）；
+//! - 真机高面板卡+面倍率 gain 150~400 → 悬崖 −7000~−20000 → 睡觉。
+//!   故场景加 current_ramen=Some(2) 倍率把 gain 推入真机量级；
+//! - turn=20 是比赛回合（G2 候选 335 分会吸收选择→假绿），改用非赛期 turn=21。
 
 use umasim::bench::seeded_rngs;
 use umasim::game::ramen::policy::RamenPolicyConfig;
@@ -37,10 +39,10 @@ fn setup() -> Result<RamenGame, Box<dyn std::error::Error>> {
 }
 
 /// 真机场景复刻：满体力、智已满（其余四维 90%）、全卡集中智位满绊（双彩以上）、
-/// 且处于吃面倍率窗口（把 raw gain 推入真机高面板量级，见文件头标定记录）
+/// 吃面倍率窗口（gain 推入真机量级）、非赛期回合（排除比赛吸收效应）
 fn make_capped_shining_wisdom() -> Result<RamenGame, Box<dyn std::error::Error>> {
     let mut game = setup()?;
-    game.base.turn = 20; // 第一年（pt_rate=16，属性维崩塌后 PT 更撑不起来）
+    game.base.turn = 21; // 第一年非赛期回合（pt_rate=16，属性维崩塌后 PT 撑不起来）
     game.stage = RamenStage::Train;
     game.base.train_level_count = [0, 0, 0, 0, 16]; // 智位等级5
     game.base.distribution = vec![Vec::new(); 5];
