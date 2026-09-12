@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: A/B bench（同种子确定性，修复前后两次 run 对照表格）
+      - name: A/B bench（A=生产preset含bug，B=预留模型off=影响上界代理）
         run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
     runs-on: ubuntu-latest
@@ -30,5 +30,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: umasim lib tests (debug)
-        run: cargo test -p umasim --lib
+      - name: umasim lib tests (debug) — 失败清单对照上游 pre-existing 基线
+        run: |
+          cargo test -p umasim --lib 2>&1 | tee /tmp/lt.log
+          status=${PIPESTATUS[0]}
+          echo "===== FAILED LIST ====="
+          grep -E '^test .* \.\.\. FAILED$' /tmp/lt.log || echo "(none)"
+          echo "===== RESULT LINES ====="
+          grep -E 'test result:' /tmp/lt.log || true
+          exit $status
