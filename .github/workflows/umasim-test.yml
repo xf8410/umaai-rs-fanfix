@@ -46,6 +46,9 @@ jobs:
           git apply --verbose patches/0004-c-reserve-r.patch
           git apply --verbose patches/0004-d-token-rera.patch
           git apply --verbose patches/0005-promote-rclamp.patch
+          git apply --verbose patches/0006-cap-discount-floor.patch
+          git apply --verbose patches/0007-rest-year-damp.patch
+          git apply --verbose patches/0008-cap-slack.patch
       - name: 打补丁后复现报告（cliff 应转 GREEN=0005 转正自证；rera 读数 GREEN/SKIP）
         run: |
           set -o pipefail
@@ -73,7 +76,10 @@ jobs:
           git apply --verbose patches/0004-c-reserve-r.patch
           git apply --verbose patches/0004-d-token-rera.patch
           git apply --verbose patches/0005-promote-rclamp.patch
-      - name: A/B bench v9（转正自检 A≡B + vcurve 留档 + F-rera 首测，六臂同种子，release）
+          git apply --verbose patches/0006-cap-discount-floor.patch
+          git apply --verbose patches/0007-rest-year-damp.patch
+          git apply --verbose patches/0008-cap-slack.patch
+      - name: A/B bench v10（转正自检 A≡B + 留档哨兵 + G/H/I 三新臂首测，九臂同种子，release）
         run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
     runs-on: ubuntu-latest

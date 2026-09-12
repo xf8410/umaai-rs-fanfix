@@ -1,0 +1,74 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0007] feat(policy): 休息价值分年折扣（配置门控，默认关逐位不变）
+
+用户原话（09-12，来源级①）：「在现在的评价下，哎哎甚至会觉得睡觉最后的智力比点智
+还高」「可能需要一个按年份变化的体力价值」。
+
+根因：休息打分 `rest_base + need × rest_vital_value` 全程常数（20 + 恢复×2.5）。
+Y3 恢复渠道密集——吃面失败率−100%（必成）、友人外出 48-80、有马 +40、URA 每回合
++20、智训自身 +5——休息的边际恢复价值与机会成本结构都已改变，常数定价使后期
+「睡到回合末」相对点智/点其他位系统性偏高。0003 vcurve 家族已判死（打分层体力
+**消费侧**软化是保护性先验，不动）；本件是**恢复侧**定价，属未测新变量族。
+
+修复：`rest_year_damp` 门控 + `rest_year_factors [Y1,Y2,Y3,URA]`（默认表
+[1.0, 0.9, 0.6, 0.3]，Y1 逐位不变，Y2/Y3/URA 递减）。守门 40 不动（打分层之前的
+硬约束，与本件正交——主人红线）。
+配置门控：RamenPolicyConfig::rest_year_damp；token `restdamp`。A/B 后定去留。
+
+diff --git a/crates/umasim/src/game/ramen/policy.rs b/crates/umasim/src/game/ramen/policy.rs
+index c7aa08f..63d1186 100644
+--- a/crates/umasim/src/game/ramen/policy.rs
++++ b/crates/umasim/src/game/ramen/policy.rs
+@@ -89,6 +89,13 @@ pub struct RamenPolicyConfig {
+     pub rest_vital_value: f32,
+     /// 训练前保留的目标体力（低于此值更倾向休息；高于此值体力收益边际下降）
+     pub rest_target_vital: i32,
++    /// 分年休息折扣门控（fanfix 0007）：开时休息价值乘 `rest_year_factors[year]`
++    /// （year=(turn/24).min(3)，URA=72+ 取索引 3）。`false`（默认）= 旧行为逐位保留。
++    /// 动机：Y3 恢复渠道密集（吃面必成/友人外出 48-80/URA 每回合+20/智训+5），
++    /// 休息的机会成本上升、边际恢复价值下降；常数定价使「睡到最后」在后期系统性偏高。
++    pub rest_year_damp: bool,
++    /// 分年休息价值因子 [Y1, Y2, Y3, URA]（仅 rest_year_damp=true 时读取）。
++    pub rest_year_factors: [f32; 4],
+     // ===== 比赛 =====
+     /// 自由比赛真实收益的折扣（0~1）
+     ///
+@@ -189,6 +196,8 @@ impl Default for RamenPolicyConfig {
+             rest_base: 20.0,
+             rest_vital_value: 2.5,
+             rest_target_vital: 55,
++            rest_year_damp: false,
++            rest_year_factors: [1.0, 0.9, 0.6, 0.3],
+             race_panel_discount: 0.3,
+             race_free_urgency_weight: 2000.0,
+             race_gate_slack: 1,
+@@ -859,7 +868,12 @@ impl RamenPolicy {
+             Operation::Rest => {
+                 // 休息价值：恢复体力×边际价值 + 基础值（体力越低越值）
+                 let need = (self.config.rest_target_vital - game.uma.vital).max(0) as f32;
+-                let val = self.config.rest_base + need * self.config.rest_vital_value;
++                let mut val = self.config.rest_base + need * self.config.rest_vital_value;
++                if self.config.rest_year_damp {
++                    // 分年折扣（fanfix 0007）：后期恢复渠道密集，休息价值递减。
++                    let year = ((game.turn() / 24).min(3)) as usize;
++                    val *= self.config.rest_year_factors[year];
++                }
+                 out.score = val;
+                 if self.collect_details {
+                     out.add("rest", val);
+diff --git a/crates/umasim/src/trainer/local_ramen_trainer.rs b/crates/umasim/src/trainer/local_ramen_trainer.rs
+index 5473a14..555db85 100644
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1842,6 +1842,11 @@ impl RecommendedRamenTrainer {
+                 for year in trainer.years.iter_mut() {
+                     year.config.reserve_era = true;
+                 }
++            } else if token == "restdamp" {
++                // 分年休息折扣（fanfix 0007）：默认表 [1.0, 0.9, 0.6, 0.3]。
++                for year in trainer.years.iter_mut() {
++                    year.policy.config.rest_year_damp = true;
++                }
+             } else if let Some(v) = token.strip_prefix("capf") {
+                 // 副属性折扣下限（fanfix 0006）：capf25 → floor=0.25（百分比读数）。
+                 let floor: f32 = v.parse::<f32>()? / 100.0;

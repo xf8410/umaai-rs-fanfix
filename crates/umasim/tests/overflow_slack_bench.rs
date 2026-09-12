@@ -1,13 +1,16 @@
-//! 溢出摆烂 A/B 整局基准 v9 —— 六臂：转正对照 × 体力曲线 × 乙对照 × 期权化
+//! 溢出摆烂 A/B 整局基准 v10 —— 九臂：转正对照 × 留档哨兵 × 三新臂首测
 //!
-//! 前置：CI 顺序应用 0001 + 0003 a-d + 0004 a-d + 0005（转正）。
-//! 臂 A = base（**0005 已转正：A=preset+rcamp 行为**；预期与 B 等值 ≈64271.5=转正自检）
+//! 前置：CI 顺序应用 0001 + 0003 a-d + 0004 a-d + 0005（转正）+ 0006 + 0007 + 0008。
+//! 臂 A = base（**0005 已转正：A=preset+rclamp 行为**；预期与 B 等值=转正自检）
 //! 臂 B = rclamp（显式 token，转正后应与 A 完全一致——A/B 等值即 0005 生效证明）
-//! 臂 C = vcurve（Y3=2.5） 臂 D = both 臂 E = vcurve30（Y3=3.0）——甲/乙已判负，留档回归
-//! 臂 F = rera（丙-2 首测：r 分年 [40,20,10,0] 期权表）
+//! 臂 C = vcurve（Y3=2.5） 臂 D = both 臂 E = vcurve30（Y3=3.0）——甲/乙判负，留档回归哨兵
+//! 臂 F = rera（丙-2：r 分年 [40,20,10,0] 期权表，已判中性，留档哨兵）
+//! 臂 G = capf25（0006：满位副属性折扣下限 0.25——收益侧零化修复）
+//! 臂 H = restdamp（0007：休息价值分年折扣 [1.0,0.9,0.6,0.3]——恢复侧定价）
+//! 臂 I = slack20（0008：status_gain 上限期权计价 +20——选择层有界前瞻）
 //! 计量：train/game、rests/game（守门标/anon/打分）、自选比赛、终局分。
-//! 判读：F vs A —— 预期 Y2/Y3 满位附近的训练窗口变宽（train↑ 或 打分休息↑→应保持≈0）、
-//! 终局分不劣；若 F 明显负 → 期权表初值过猛，下轮拧 [40,30,15,0] 再测（一次只动一个变量）。
+//! 判读（一次一变量，各自独立对 A）：见 docs/bench-v10-hypotheses.md 的否决线；
+//! 任何新臂终局分劣于 A 超过噪声带（≈0.15%）即判负留档，不进组合臂。
 
 use umasim::bench::{load_player_builds, seeded_rngs, select_representatives, CardPickOpts};
 use umasim::game::ramen::RamenGame;
@@ -58,13 +61,16 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 6] = [
+    let arm_defs: [(&str, &str); 9] = [
         ("A-preset(转正)", "base"),
         ("B-rclamp", "rclamp"),
         ("C-vcurve", "vcurve"),
         ("D-both", "rclamp-vcurve"),
         ("E-vcurve30", "vcurve30"),
         ("F-rera", "rera"),
+        ("G-capf25", "capf25"),
+        ("H-restdamp", "restdamp"),
+        ("I-slack20", "slack20"),
     ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
@@ -131,7 +137,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 转正对照 × 体力曲线 × 期权化 A/B（{RUNS} 局/build × 6 臂）=====");
+    println!("\n===== 转正对照 × 体力曲线 × 期权化 A/B（{RUNS} 局/build × 9 臂）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
             println!("{name}: 跳过（构造失败，见上方日志）");

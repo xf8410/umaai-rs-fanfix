@@ -1,0 +1,70 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0008] feat(policy): status_gain 上限期权计价 cap_slack（默认 0 逐位不变）
+
+用户诊断③（09-12 原话，来源级①）：「现在没有对超过上限的训练收益做一个合理的建模」。
+报告书 §5 既定形态之一（当时「库存不立项」，本案主病灶收尾后重启）：不给溢出真实分
+（游戏 .min(limit) 截断，给了就是谎），而是把「上限还会再抬」的期权价计入选择层。
+
+机制依据（真实、可查）：Y2 basic 上限 +20、Y3 +40（status_limit 年度抬升）、超级拉面
+training_limit_options +100。满位（cur=limit）时 status_gain 恒 0 → 训练该位只剩
+PT+副属性计价；但若干回合后上限抬升，当前「溢出」的增量将变成真分。常数视野看不到
+这一步（注释明文「跨回合前瞻留给 MCTS 搜索」），本件给单点启发式一个有界前瞻代理。
+
+修复：`status_gain` 计价上限 = limit + cap_slack（默认 0=逐位不变）。计价诚实性：
+只影响动作选择排序，不改变游戏真实入账（add_value 仍按 limit 截断）；期权价上界由
+cap_slack 钳制（测试臂 20 ≈ Y2 抬升幅度，保守）。
+配置门控：RamenPolicyConfig::cap_slack；token `slack20`。A/B 后定去留。
+
+diff --git a/crates/umasim/src/game/ramen/policy.rs b/crates/umasim/src/game/ramen/policy.rs
+index 63d1186..cb9c94c 100644
+--- a/crates/umasim/src/game/ramen/policy.rs
++++ b/crates/umasim/src/game/ramen/policy.rs
+@@ -74,6 +74,11 @@ pub struct RamenPolicyConfig {
+     /// 若该回合 PT 增量偏低，休息即可反超（用户「偏科/摆烂」诊断②的残余通路）。
+     /// 设下限后满位训练保留副属性的部分计价，分流激励主体仍由 `cap_discount_weight` 承担。
+     pub cap_discount_floor: f32,
++    /// 上限期权计价余量（fanfix 0008）：`status_gain` 计价时把上限视为 `limit + cap_slack`。
++    /// 对应真实机制：Y2 basic 上限 +20、Y3 +40（status_limit 抬升）——满位附近训练按
++    /// 「上限将抬」的期权价计费。实际入账仍由游戏 `.min(limit)` 截断，只影响选择不改真实收益。
++    /// `0`（默认）= 旧行为逐位保留。
++    pub cap_slack: i32,
+     /// 训练失败惩罚（期望值中被扣减的固定分）
+     pub failure_penalty: f32,
+     /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
+@@ -189,6 +194,7 @@ impl Default for RamenPolicyConfig {
+             pt_rate: 8.0,
+             cap_discount_weight: 0.0,
+             cap_discount_floor: 0.0,
++            cap_slack: 0,
+             failure_penalty: 60.0,
+             effective_ramen_failure: true,
+             shining_bonus: 60.0,
+@@ -918,7 +924,10 @@ impl RamenPolicy {
+         // `inc` 取 i32：负值若直接 `as usize` 会回绕成天文数字，debug 下加法直接溢出 panic。
+         // 当前训练增量恒为正打不到，这里显式夹到 0 以免将来引入负增量时静默炸掉。
+         let cur = game.uma.five_status[i].min(game.uma.five_status_limit[i]).max(0);
+-        let next = cur.saturating_add(inc.max(0)).min(game.uma.five_status_limit[i]);
++        // 上限期权（fanfix 0008）：计价上限 = limit + cap_slack（默认 0=逐位不变）。
++        // 游戏实际入账仍按 limit 截断；此处只抬「选择层」的计价视野，不虚构真实收益。
++        let price_limit = game.uma.five_status_limit[i] + self.config.cap_slack.max(0);
++        let next = cur.saturating_add(inc.max(0)).min(price_limit);
+         let cur_score = cons.status_final_score(cur) as f32;
+         let next_score = cons.status_final_score(next) as f32;
+         (next_score - cur_score) * self.config.status_rate
+diff --git a/crates/umasim/src/trainer/local_ramen_trainer.rs b/crates/umasim/src/trainer/local_ramen_trainer.rs
+index 555db85..6edee18 100644
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1842,6 +1842,12 @@ impl RecommendedRamenTrainer {
+                 for year in trainer.years.iter_mut() {
+                     year.config.reserve_era = true;
+                 }
++            } else if let Some(v) = token.strip_prefix("slack") {
++                // 上限期权计价余量（fanfix 0008）：slack20 → cap_slack=20。
++                let slack: i32 = v.parse()?;
++                for year in trainer.years.iter_mut() {
++                    year.policy.config.cap_slack = slack;
++                }
+             } else if token == "restdamp" {
+                 // 分年休息折扣（fanfix 0007）：默认表 [1.0, 0.9, 0.6, 0.3]。
+                 for year in trainer.years.iter_mut() {

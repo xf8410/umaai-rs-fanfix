@@ -1,0 +1,70 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0006] feat(policy): cap_discount ratio 下限（配置门控，默认关逐位不变）
+
+用户诊断②残余通路（09-12 原话，来源级①）：「属性递增+PT 固定致偏科」「拉高手写逻辑
+属性门限，允许手写逻辑溢出一点」。
+
+根因：rclamp（0001→0005）转正后，满位训练的负罚分已消除，但 cap_discount 在
+cap_left=0 时 ratio=0 → 副属性差分收益全清零，该位只剩 PT 一项计价。preset pt_rate
+虽高（Y2/Y3=64），但单回合 PT 增量取决于卡面/友情，偏低回合休息（20+恢复×2.5）即可
+反超 → 满位附近出现「能练不练」。与 0004 rera（r 侧，判中性）互补：本件修的是
+**收益侧**的零化，不是罚分侧。
+
+修复：ratio 加可配置下限 `cap_discount_floor`（默认 0.0=逐位不变）。满位时副属性保留
+下限比例计价；分流激励主体仍由 `cap_discount_weight` 承担（EXP-006d 实证不回退）。
+PBRS 视角（Ng/Harada/Russell 1999）：cap_left=0 处收益从正跳零是非势函数悬崖，
+下限把跳变软化成斜坡，不引入虚构收益（实际入账仍被游戏截断）。
+配置门控：RamenPolicyConfig::cap_discount_floor；token `capf25` → 0.25。A/B 后定去留。
+
+diff --git a/crates/umasim/src/game/ramen/policy.rs b/crates/umasim/src/game/ramen/policy.rs
+index 4917fc9..c7aa08f 100644
+--- a/crates/umasim/src/game/ramen/policy.rs
++++ b/crates/umasim/src/game/ramen/policy.rs
+@@ -69,6 +69,11 @@ pub struct RamenPolicyConfig {
+     /// 已满位是正当行为，且训练任何位都给 PT，打折只是扭曲选择）。
+     /// `0.0` 关闭；`1.0` 全额打折。配置 token `capd100` 对应 `1.0`。
+     pub cap_discount_weight: f32,
++    /// 副属性折扣下限（fanfix 0006）：`ratio` 不低于此值。`0.0`（默认）= 旧行为逐位保留。
++    /// 主位已满（cap_left=0）时 ratio 原为 0 → 副属性收益全清零，该位只剩 PT 一项收益；
++    /// 若该回合 PT 增量偏低，休息即可反超（用户「偏科/摆烂」诊断②的残余通路）。
++    /// 设下限后满位训练保留副属性的部分计价，分流激励主体仍由 `cap_discount_weight` 承担。
++    pub cap_discount_floor: f32,
+     /// 训练失败惩罚（期望值中被扣减的固定分）
+     pub failure_penalty: f32,
+     /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
+@@ -176,6 +181,7 @@ impl Default for RamenPolicyConfig {
+             status_rate: 1.0,
+             pt_rate: 8.0,
+             cap_discount_weight: 0.0,
++            cap_discount_floor: 0.0,
+             failure_penalty: 60.0,
+             effective_ramen_failure: true,
+             shining_bonus: 60.0,
+@@ -791,7 +797,9 @@ impl RamenPolicy {
+         let inc_main = value.status_pt[train].max(0);
+         let cap_left = (game.uma().five_status_limit[train] - game.uma().five_status[train]).max(0);
+         let ratio = if self.config.cap_discount_weight > 0.0 && inc_main > 0 {
+-            (cap_left as f32 / (inc_main as f32 * 3.0)).clamp(0.0, 1.0)
++            (cap_left as f32 / (inc_main as f32 * 3.0))
++                .clamp(0.0, 1.0)
++                .max(self.config.cap_discount_floor)
+         } else {
+             1.0
+         };
+diff --git a/crates/umasim/src/trainer/local_ramen_trainer.rs b/crates/umasim/src/trainer/local_ramen_trainer.rs
+index 947815a..5473a14 100644
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1842,6 +1842,12 @@ impl RecommendedRamenTrainer {
+                 for year in trainer.years.iter_mut() {
+                     year.config.reserve_era = true;
+                 }
++            } else if let Some(v) = token.strip_prefix("capf") {
++                // 副属性折扣下限（fanfix 0006）：capf25 → floor=0.25（百分比读数）。
++                let floor: f32 = v.parse::<f32>()? / 100.0;
++                for year in trainer.years.iter_mut() {
++                    year.policy.config.cap_discount_floor = floor;
++                }
+             } else {
+                 anyhow::bail!("未知 token: {token}（完整: {tokens}）");
+             }
