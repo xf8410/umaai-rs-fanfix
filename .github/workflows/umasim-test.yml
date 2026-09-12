@@ -22,10 +22,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: 诊断补丁上下文（policy.rs 守门区实际字节）
+      - name: 诊断补丁上下文（policy.rs 46-54 行，带行号与边界标记）
         run: |
-          grep -n "wisdom_vital_floor" crates/umasim/src/game/ramen/policy.rs | head -5
-          awk 'NR>=38 && NR<=50 {printf "%d|%s|\n", NR, $0}' crates/umasim/src/game/ramen/policy.rs
+          awk 'NR>=46 && NR<=54 {printf "%d|%s|\n", NR, $0}' crates/umasim/src/game/ramen/policy.rs
+          grep -n "心情低于此值" crates/umasim/src/game/ramen/policy.rs | head -3
       - name: 应用实验补丁（运行期，不提交回分支；recount 防头行数误差）
         run: git apply --recount --verbose patches/0001-reserve-penalty-clamp.patch patches/0002-gate-low-risk-exemption.patch
       - name: A/B bench（同种子确定性，7 臂解药对照）
