@@ -1,9 +1,12 @@
-//! 溢出摆烂 A/B 整局基准 v6 —— 守门方向作废（用户判定：守门是对的），只测上限软化
+//! 溢出摆烂 A/B 整局基准 v7 —— 四臂：上限软化 × 体力曲线正交验证
 //!
-//! 臂 A = preset 原样（上限硬门限悬崖在位）——token 用 "base"（上游 with_tokens
-//!       对未知/空 token 严格报错，"" 会被拒；"base" 是官方无覆盖对照名）。
-//! 臂 B = rclamp（patch 0001 v2：预留罚分钳制到剩余空间；CI 应用补丁后此臂激活，否则跳过）
+//! 臂 A = base（preset 原样，官方对照 token；"" 会被上游严格校验拒绝）
+//! 臂 B = rclamp（patch 0001 v2：预留罚分钳制；CI 未应用补丁时此臂自动跳过）
+//! 臂 C = vcurve（patch 0003 v1：分年体力曲线 Y1 4.0/Y2 3.5/Y3 2.5 + 回体力对称计值）
+//! 臂 D = rclamp-vcurve（both，验证两修复正交、无叠加劣化）
 //! 计量：train/game、rests/game（守门标/守门anon/打分）、自选比赛、终局分。
+//! 验收重点（ab-results-rclamp.md 教训）：整局分对 margin 级修复不敏感，
+//! 盯「打分休息数、train/game、自选赛数」行为列。
 
 use umasim::bench::{load_player_builds, seeded_rngs, select_representatives, CardPickOpts};
 use umasim::game::ramen::RamenGame;
@@ -54,9 +57,12 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    // 注意：with_tokens 对未知 token 严格报错（上游防拼错静默跑成 base 的约定），
-    // 空串不是合法 token——对照臂必须用官方名 "base"。
-    let arm_defs: [(&str, &str); 2] = [("A-preset", "base"), ("B-rclamp", "rclamp")];
+    let arm_defs: [(&str, &str); 4] = [
+        ("A-preset", "base"),
+        ("B-rclamp", "rclamp"),
+        ("C-vcurve", "vcurve"),
+        ("D-both", "rclamp-vcurve"),
+    ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
 
@@ -122,7 +128,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 上限软化 A/B（{RUNS} 局/build）=====");
+    println!("\n===== 上限软化 × 体力曲线 A/B（{RUNS} 局/build × 4 臂）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
             println!("{name}: 跳过（构造失败，见上方日志）");
