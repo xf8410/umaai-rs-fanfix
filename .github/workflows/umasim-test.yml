@@ -14,8 +14,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: overflow-slack repro（修复前预期为红 = 复现成功）
+      - name: overflow-slack repro（修复前预期红=复现，修复后应绿）
         run: cargo test -p umasim --test overflow_slack_repro -- --nocapture
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: A/B bench（同种子确定性，修复前后两次 run 对照表格）
+        run: cargo test --release -p umasim --test overflow_slack_bench -- --nocapture
   libtests:
     runs-on: ubuntu-latest
     steps:
