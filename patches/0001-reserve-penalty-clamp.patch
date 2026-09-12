@@ -1,38 +1,49 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0001] fix(umasim): reserve_penalty 对已满属性位重复收费导致训练摆烂
+Subject: [PATCH 0001 v2] feat(umasim): reserve_penalty 上限钳制（配置门控 rclamp，默认关逐位不变）
 
-症状（小黑板已知问题）：属性溢出时 AI 不训练、选择休息（例：溢出智时）。
+用户定调（09-12 原话，来源级①）：「手写逻辑的属性上限硬门限有问题，得软化。」
 
-根因：`LocalRamenTrainer::reserve_penalty` 把「原始训练增益」全额记为
-预留空间侵占。属性已满（h=0）时游戏会截断增益、属性实际不动，
-但公式仍按 gain 收费：罚分 = 6×(gain + gain²/2r)。turn=50（r≈13.7）、
-gain=60 时罚 ≈1149 分，淹没已满位仅剩的 PT 价值，把该位训练打成深度负分。
-溢出浪费已由 `status_gain` 截断计价一次，此处属重复收费。
+根因：属性已满（h=0）时游戏截断增益、属性不动，但 reserve_penalty 仍按原始 gain
+记「预留空间被侵占」：罚分 = 6×(gain + gain²/2r)。满体力+主位溢出+高彩圈+等级5
+（gain≈200, turn≈30, r≈24）时罚 ≈ −6200，淹没该位仅剩的 PT+彩圈价值（≈+2200），
+净负四五千 → 休息(20分)躺赢 → 「满体力也不练智、双彩选睡觉」（用户真机实观）。
+溢出浪费已由 status_gain 截断计价一次，此处为重复收费=上限处的人为悬崖。
 
-实证：crates/umasim/tests/overflow_slack_repro.rs::reserve_penalty_zero_for_capped_slot
-修复前红（实测 1149.23，期望 0），修复后绿。整局聚合影响 ≈ −67 分（噪声级），
-但它是确定的建模错误，且是文档「溢出摆烂」在打分层的组成部分之一。
-
-修复：把计入惩罚的增益钳制到剩余空间 h（h=0 → 罚分 0；gain≤h 时逐位不变；
-负增益释放空间的语义不变）。
-
-影响面：仅策略评分层（preset status_reserve_max=40 时生效；default 0=关闭不受影响）。
-改决策轨迹 → 拉面基线作废（上游惯例，PR 须注明+重抓快照）。
+修复（软化，非回合特判）：钳制计入惩罚的增益 ≤ 剩余空间 h。
+h=0 → 罚 0；gain≤h 时与原式逐位一致；负增益（释放空间）语义不变。
+配置门控：LocalRamenConfig::reserve_clamp，默认 false（旧行为逐位保留），
+with_tokens("rclamp") 开启；A/B 验证后再定 preset 默认值。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -466,8 +466,13 @@
-         let mut p = 0.;
-         for i in 0..5 {
+@@ -325,4 +325,6 @@
+     /// RMJ/第三年5000目标在截止前的可达性紧迫度。
+     pub deadline_urgency_scale: f32,
++    /// 上限钳制（fanfix 0001 v2）：reserve_penalty 计入惩罚的增益钳制到剩余空间 h
++    /// （属性已满→罚 0；gain≤h 逐位不变）。`false`（默认）= 旧行为逐位保留。
++    pub reserve_clamp: bool,
+     /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
+     pub dynamic_special_targets: bool
+@@ -372,2 +374,3 @@
+             deadline_urgency_scale: 0.0,
++            reserve_clamp: false,
+             dynamic_special_targets: false
+@@ -596,5 +599,6 @@
              let h = (g.uma.five_status_limit[i] - g.uma.five_status[i]).max(0) as f32;
              let b = (r - h).max(0.);
 -            let a = (r - (h - gain[i] as f32)).max(0.);
-+            // 增益超过剩余空间的部分会被游戏截断：属性不动、无空间可侵占，
-+            // 溢出浪费已由 status_gain 截断计价一次，此处不得重复收费。
-+            // h=0（已满）→ eff=0 → 罚分 0；gain<=h 时与原式逐位一致；
-+            // 负增益（释放空间）不受钳制影响（min 取负值本身）。
-+            let eff = (gain[i] as f32).min(h);
++            let eff = if self.config.reserve_clamp { (gain[i] as f32).min(h) } else { gain[i] as f32 };
 +            let a = (r - (h - eff)).max(0.);
              p += (a * a - b * b) / (2. * r.max(1.));
-         }
-         p * 6.
+@@ -1081,6 +1085,11 @@ impl RecommendedRamenTrainer {
+             } else if let Some(v) = token.strip_prefix("wisf") {
+                 let floor: i32 = v.parse()?;
+                 for year in trainer.years.iter_mut() {
+                     year.policy.config.wisdom_vital_floor = floor;
+                 }
++            } else if token == "rclamp" {
++                // 上限钳制（fanfix 0001 v2）：软化属性上限处的预留罚分悬崖。
++                for year in trainer.years.iter_mut() {
++                    year.config.reserve_clamp = true;
++                }
+             } else if let Some(v) = token.strip_prefix("capd") {
