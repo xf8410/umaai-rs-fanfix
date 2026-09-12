@@ -1,0 +1,21 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0004-a] struct 字段 reserve_era + reserve_era_years（单 hunk）
+
+丙-2 立项：上限抬升期权价进 r。锚=0003-a v2 产物。
+手验行数：old=4，new=11。
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -339,4 +339,11 @@
+     pub vital_curve: bool,
+     /// 分年体力单价 [Y1, Y2, Y3, URA]（仅 vital_curve=true 时读取）。
+-    pub vital_curve_years: [f32; 4]
++    pub vital_curve_years: [f32; 4],
++
++    /// 预留上限期权门控（fanfix 0004）：开时 reserve_penalty 的 r 改按 reserve_era_years[year]，
++    /// 把「上限还会再抬」（Y2 basic+20 / Y3+40 / 超级拉面+100）的期望价计入剩余空间。
++    /// `false`（默认）= 旧行为逐位保留。
++    pub reserve_era: bool,
++    /// 分年预留 headroom [Y1, Y2, Y3, URA]（仅 reserve_era=true 时读取）。
++    pub reserve_era_years: [f32; 4]
+ }
