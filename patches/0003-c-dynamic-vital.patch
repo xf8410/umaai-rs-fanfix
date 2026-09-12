@@ -1,23 +1,18 @@
 From: xf8410/umaai-rs-fanfix overflow-slack investigation
-Subject: [PATCH 0003-c] dynamic_vital 块：分年价格曲线 + 回体力对称计值（单 hunk）
+Subject: [PATCH 0003-c v2] dynamic_vital 块：价格表读取 + 回体力对称计值（单 hunk）
+
+v2：读 config.vital_curve_years[year]（turn 从 0 起，year=(turn/24).min(3)，URA=72+→索引3）。
+手验行数：old=8（1+2删+5 ctx），新增 12 行，new=18（1+12+5）。
 
 --- a/crates/umasim/src/trainer/local_ramen_trainer.rs
 +++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
-@@ -994,8 +994,26 @@
+@@ -994,8 +994,18 @@
              if self.config.dynamic_vital {
 -                let c = (-val.vital).max(0) as f32;
 -                let z = -c * (Self::vital_factor(g.turn()) - self.policy.config.train_vital_value);
 +                let f = if self.config.vital_curve {
-+                    let t = g.turn();
-+                    if t >= 72 {
-+                        0.25
-+                    } else if t < 24 {
-+                        4.0
-+                    } else if t < 48 {
-+                        3.5
-+                    } else {
-+                        2.5
-+                    }
++                    let year = ((g.turn() / 24).min(3)) as usize;
++                    self.config.vital_curve_years[year]
 +                } else {
 +                    Self::vital_factor(g.turn())
 +                };
