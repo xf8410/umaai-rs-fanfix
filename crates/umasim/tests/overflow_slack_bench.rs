@@ -1,9 +1,9 @@
-//! 溢出摆烂 A/B 整局基准 v2 —— 归因在 CI 内完成，不靠人眼读截断日志
+//! 溢出摆烂 A/B 整局基准 v2.1 —— 归因在 CI 内完成，不靠人眼读截断日志
 //!
 //! 比赛归因：career_races 位图（umaDB races 目标赛程）→ is_race_turn 判强制；
 //!           非强制回合选比赛 = 策略自选（free），这才是策略层计量。
 //! 休息归因：breakdown 含「守门」= 体力守门；否则解析各候选分数——
-//!           休息分 ≥ 最佳训练分 = 打分胜出；训练分更高却休息 = ANOMALOUS（未知路径，逐条打印）。
+//!           休息分 ≥ 最佳训练分 = 打分胜出；训练分更高/无休息项 = ANOMALOUS（逐条打印样本）。
 //! 臂 A = preset(reserve40, 含 S1 重复收费 bug)；臂 B = 同 preset 但预留模型关闭（上界对照）。
 
 use umasim::bench::{load_player_builds, seeded_rngs, select_representatives, CardPickOpts};
@@ -25,18 +25,43 @@ fn preset_with_reserve(reserve: f32) -> RecommendedRamenTrainer {
     )
 }
 
-/// 解析 "#0 520[速训练 ...] | #6 20[休息]" 形式的 breakdown → (score, reason)
+/// 解析 "#0 520[速训练 失败率0% 属性+85 PT+8] | #6 20[休息]" → (score, reason)
 fn parse_breakdown(bd: &str) -> Vec<(f32, String)> {
     bd.split(" | #")
         .filter_map(|item| {
-            let item = item.trim_start_matches('#').trim_start_matches(|c: char| c.is_ascii_digit()).trim_start();
-            let (num, rest) = item.split_once(' ')?;
-            let _ = num;
-            let score = rest.split('[').next()?.trim().parse::<f32>().ok()?;
-            let reason = rest.split_once('[').map(|(_, r)| r.trim_end_matches(']').to_string())?;
-            Some((score, reason))
+            let item = item.trim_start_matches('#');
+            let (_idx, rest) = item.split_once(' ')?; // "520[速训练 ...]"
+            let (score_s, reason) = rest.split_once('[')?;
+            let score = score_s.trim().parse::<f32>().ok()?;
+            Some((score, reason.trim_end_matches(']').to_string()))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::parse_breakdown;
+
+    #[test]
+    fn parses_scores_and_reasons() {
+        let bd = "#0 520[速训练 失败率0% 属性+85 PT+8] | #5 1564[比赛(G1 五维[5, 5, 5, 5, 5]×1.60 PT+80 体力-15 折扣0.30)] | #6 20[休息]";
+        let e = parse_breakdown(bd);
+        assert_eq!(e.len(), 3, "三项: {e:?}");
+        assert_eq!(e[0].0, 520.0);
+        assert!(e[0].1.starts_with("速训练"));
+        assert_eq!(e[1].0, 1564.0);
+        assert!(e[1].1.starts_with("比赛"));
+        assert_eq!(e[2].0, 20.0);
+        assert_eq!(e[2].1, "休息");
+    }
+
+    #[test]
+    fn parses_gate_max_score() {
+        let bd = "#0 340282346638528859811704183484516925440[守门: 体力38<40休息]";
+        let e = parse_breakdown(bd);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].1.contains("守门"));
+    }
 }
 
 #[derive(Default)]
@@ -112,8 +137,9 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                                     a.rest_anomalous += 1;
                                     if anom_samples.len() < 12 {
                                         anom_samples.push(format!(
-                                            "{arm_name} {} seed={seed} turn={} best_train={:.0} bd={}",
-                                            build.name(), row.turn, best_train,
+                                            "{arm_name} {} seed={seed} turn={} best_train={best_train:.0} bd={}",
+                                            build.name(),
+                                            row.turn,
                                             &bd[..bd.len().min(400)]
                                         ));
                                     }
@@ -126,7 +152,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 归因汇总（{} 局/build × 2 臂）=====", RUNS);
+    println!("\n===== 归因汇总（{RUNS} 局/build × 2 臂）=====");
     for (name, a) in &arms {
         let g = a.games.max(1) as f64;
         println!(
@@ -139,7 +165,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
             a.rest_anomalous as f64 / g
         );
     }
-    println!("\n===== ANOMALOUS 样本（休息但训练分更高 → 未知路径）=====");
+    println!("\n===== ANOMALOUS 样本（休息但训练分更高/无休息项 → 未知路径）=====");
     for s in &anom_samples {
         println!("{s}");
     }
