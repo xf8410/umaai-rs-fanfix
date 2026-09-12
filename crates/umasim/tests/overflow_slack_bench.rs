@@ -1,11 +1,13 @@
-//! 溢出摆烂 A/B 整局基准 v3 —— 归因已定谳（休息=体力硬守门），本轮测解药
+//! 溢出摆烂 A/B 整局基准 v4 —— 归因已定谳（休息=体力硬守门 100%），本轮测解药
 //!
-//! 臂 A = preset 对照（vital_rest=40 硬守门，wisdom_vital_floor=MAX 豁免关）
-//! 臂 C = preset + wisf25（vital≥25 时智力训练豁免硬守门——智力位失败率阈值~32
-//!        远低于其他位、且体力+5，正是"按别的指标放行"的现成开关）
-//! 臂 D = preset + wisf35（更激进：vital≥35 即豁免，几乎把守门让位给打分）
-//! 计量：rests/game（守门/打分/异常=守门重算覆盖）、自选比赛、终局分。
-//! 异常类在 v2 已证明=守门+recovery_guard 覆盖 breakdown，本轮把异常并回守门统计口径。
+//! 臂 A = preset（vital_rest=40 硬守门，豁免全关）
+//! 臂 C = wisf25（EXP-006c 现成开关：智力位豁免，vital≥25）
+//! 臂 D = wisf35
+//! 臂 E = grf15 （patch 0002 通用低危豁免：任一训练位失败率≤15%且体力≥0 → 放行打分）
+//! 臂 F = grf25
+//! 臂 G = wisf25-grf15
+//! grf* 依赖运行期 git apply patches/0002（CI bench job 已接线）；未打补丁时该臂自动跳过。
+//! 计量：train/game、rests/game（守门标/守门anon/打分）、自选比赛、终局分。
 
 use umasim::bench::{load_player_builds, seeded_rngs, select_representatives, CardPickOpts};
 use umasim::game::ramen::RamenGame;
@@ -56,21 +58,38 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let mut arms = [
-        ("A-preset", Agg::default()),
-        ("C-wisf25", Agg::default()),
-        ("D-wisf35", Agg::default()),
+    let arm_defs: [(&str, &str); 7] = [
+        ("A-preset", ""),
+        ("C-wisf25", "wisf25"),
+        ("D-wisf35", "wisf35"),
+        ("E-grf15", "grf15"),
+        ("F-grf25", "grf25"),
+        ("G-wisf25-grf15", "wisf25-grf15"),
+        ("H-wisf35-grf25", "wisf35-grf25"),
     ];
+    let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
+    let mut skipped: Vec<&str> = Vec::new();
 
     for build in &builds {
         let deck_ids = build.build_deck(&representatives.picked, FRIEND)?;
         for i in 0..RUNS {
             let seed = BASE_SEED + i;
-            for (arm_name, trainer) in [
-                ("A-preset", RecommendedRamenTrainer::new()),
-                ("C-wisf25", RecommendedRamenTrainer::with_tokens("wisf25")?),
-                ("D-wisf35", RecommendedRamenTrainer::with_tokens("wisf35")?),
-            ] {
+            for (name, tokens) in &arm_defs {
+                if skipped.contains(name) {
+                    continue;
+                }
+                let trainer = if tokens.is_empty() {
+                    RecommendedRamenTrainer::new()
+                } else {
+                    match RecommendedRamenTrainer::with_tokens(tokens) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            println!("跳过臂 {name}: {e}");
+                            skipped.push(name);
+                            continue;
+                        }
+                    }
+                };
                 let (mut rng, rule_master) = seeded_rngs(BASE_SEED, i);
                 let mut game = RamenGame::newgame(UMA, &deck_ids, inherit.clone())?;
                 game.set_rule_master(rule_master);
@@ -78,7 +97,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                 game.run_full_game(&logged, &mut rng)?;
                 let log = logged.take_records();
 
-                let a = &mut arms.iter_mut().find(|(n, _)| *n == arm_name).unwrap().1;
+                let a = &mut aggs.iter_mut().find(|(n, _)| n == name).unwrap().1;
                 a.games += 1;
                 a.score += game.uma.calc_score() as f64;
 
@@ -108,7 +127,6 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                                 .fold(f32::NEG_INFINITY, f32::max);
                             match rest {
                                 Some(rs) if rs >= best_train - 0.5 => a.rest_scoring += 1,
-                                // 休息分不是最高 → recovery_guard 覆盖 breakdown 的守门路径
                                 _ => a.rest_gate_anon += 1,
                             }
                         }
@@ -118,21 +136,24 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 解药 A/B（{RUNS} 局/build × 3 臂）=====");
-    for (name, a) in &arms {
-        let g = a.games.max(1) as f64;
+    println!("\n===== 解药 A/B（{RUNS} 局/build）=====");
+    for (name, a) in &aggs {
+        if a.games == 0 {
+            println!("{name}: 跳过（token 不可用 = 补丁未应用）");
+            continue;
+        }
+        let g = a.games as f64;
         println!(
-            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(守门标 {:.2}+守门anon {:.2}+打分 {:.2}) | races/game 强制={:.2} 自选={:.2}",
+            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(标 {:.2}+anon {:.2}+打分 {:.2}) | 自选比赛/game={:.2}",
             a.score / g,
             a.train_turns as f64 / g,
             (a.rest_gate_marked + a.rest_gate_anon + a.rest_scoring) as f64 / g,
             a.rest_gate_marked as f64 / g,
             a.rest_gate_anon as f64 / g,
             a.rest_scoring as f64 / g,
-            a.race_forced as f64 / g,
             a.race_free as f64 / g
         );
     }
-    assert!(arms[0].1.games > 0);
+    assert!(aggs[0].1.games > 0);
     Ok(())
 }
