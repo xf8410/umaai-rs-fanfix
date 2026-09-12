@@ -1,7 +1,7 @@
 name: bootstrap-mirror
-# 一次性仓库引导：把上游 xulai1001/umaai-rs master 原样镜像进本仓 master 分支。
-# 只复制仓库内容，不生成/修改任何源码（与"CI 打补丁改源码"红线无关）。
-# 用途：Agent 工具无法 bulk-push，用此 workflow 建立可编译基线；跑一次后即删除本文件。
+# 一次性仓库引导：把上游 xulai1001/umaai-rs master 压成单个导入提交镜像进本仓 master。
+# 浅克隆直接 push 会被拒（缺父对象），故重建为 orphan 历史；上游 SHA 钉在提交信息里。
+# 只复制仓库内容，不生成/修改任何源码。跑一次后即删除本文件。
 on:
   workflow_dispatch:
 
@@ -12,11 +12,19 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone upstream and push to this repo's master
+      - name: Clone upstream, squash-import, push master
         run: |
+          UPSTREAM_SHA=$(git ls-remote https://github.com/xulai1001/umaai-rs.git master | cut -f1)
+          echo "upstream master = $UPSTREAM_SHA"
           git clone --depth 1 --branch master https://github.com/xulai1001/umaai-rs.git src
           cd src
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          rm -rf .git
+          git init -b master
+          git config user.name "fanfix-bootstrap"
+          git config user.email "bootstrap@localhost"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git add -A
+          git commit -m "chore: import upstream xulai1001/umaai-rs master @ ${UPSTREAM_SHA} (squashed mirror baseline)"
           git push origin master:master --force
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
