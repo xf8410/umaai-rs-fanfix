@@ -1,30 +1,16 @@
-name: bootstrap-mirror
-# 一次性仓库引导：把上游 xulai1001/umaai-rs master 压成单个导入提交镜像进本仓 master。
-# 浅克隆直接 push 会被拒（缺父对象），故重建为 orphan 历史；上游 SHA 钉在提交信息里。
-# 只复制仓库内容，不生成/修改任何源码。跑一次后即删除本文件。
+name: bootstrap-mirror (retired)
+# 一次性镜像已于 run 34660876099 完成（master = 上游 e8f6f263 压缩导入）。
+# 本文件退役为惰性占位：无 workflow_dispatch、push 触发指向永不存在的分支。
+# （工具无删文件能力，故以惰性化代替删除；可随时手动删除本文件。）
 on:
-  workflow_dispatch:
+  push:
+    branches: ["__never__"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  mirror:
+  noop:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone upstream, squash-import, push master
-        run: |
-          UPSTREAM_SHA=$(git ls-remote https://github.com/xulai1001/umaai-rs.git master | cut -f1)
-          echo "upstream master = $UPSTREAM_SHA"
-          git clone --depth 1 --branch master https://github.com/xulai1001/umaai-rs.git src
-          cd src
-          rm -rf .git
-          git init -b master
-          git config user.name "fanfix-bootstrap"
-          git config user.email "bootstrap@localhost"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git add -A
-          git commit -m "chore: import upstream xulai1001/umaai-rs master @ ${UPSTREAM_SHA} (squashed mirror baseline)"
-          git push origin master:master --force
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: echo "retired one-time bootstrap; mirror already completed"
