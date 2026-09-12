@@ -1,0 +1,17 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0003-d] with_tokens 增 "vcurve" token（单 hunk）
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1120,6 +1120,11 @@
+                 for year in trainer.years.iter_mut() {
+                     year.config.power_gap_strength = s;
+                 }
++            } else if token == "vcurve" {
++                // 分年体力曲线 + 回体力对称计值（fanfix 0003）：软化后期体力定价。
++                for year in trainer.years.iter_mut() {
++                    year.config.vital_curve = true;
++                }
+             } else {
+                 anyhow::bail!("未知 token: {token}（完整: {tokens}）");
+             }
