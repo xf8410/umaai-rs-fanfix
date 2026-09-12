@@ -1,0 +1,23 @@
+/target
+/docs
+logs
+/training_data
+*.pyc
+*.svg
+saved_models
+pub
+docs
+training
+scripts/export_support_card/*.json
+master.mdb
+.claude
+.portable
+
+# Generated benchmark and training reports
+/benchmark-results/
+
+# Local Go toolchain caches (used for pprof tooling during profiling)
+.gocache/
+.gopath/
+/tmp/
+

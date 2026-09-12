@@ -1,0 +1,126 @@
+[package]
+name = "umasim"
+version = "0.14.0"
+edition = "2024"
+
+[[bin]]
+name = "umasim"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ramen_manual"
+path = "src/bin/ramen_manual.rs"
+required-features = ["cli", "diag"]
+
+[[bin]]
+name = "ramen_player"
+path = "src/bin/ramen_player.rs"
+required-features = ["cli", "diag"]
+
+[[bin]]
+name = "trainer_overhead_diagnostic"
+path = "tools/data_collection/trainer_overhead.rs"
+
+[[bin]]
+name = "mcts_rollout_switch_verify"
+path = "tools/data_collection/mcts_rollout_switch_verify.rs"
+
+[[bin]]
+name = "sim_profiler"
+path = "tools/data_collection/sim_profiler.rs"
+# pprof-rs 只支持 Linux/macOS（依赖 pthread/siginfo/ucontext 等 Unix API），
+# 在 Windows 上编译失败，故不进 default，需显式 `--features profiler`
+required-features = ["profiler"]
+
+[[bin]]
+name = "calc_training_value_microbench"
+path = "tools/data_collection/calc_training_value_microbench.rs"
+
+[[bin]]
+name = "mcts_profiler"
+path = "src/bin/mcts_profiler.rs"
+# 顶层 `#![cfg(feature = "profiler")]`：无 profiler feature 时整个文件为空，
+# 不注册 required-features 会在默认 check/build 时报 "main function not found"。
+required-features = ["profiler"]
+
+[[bin]]
+name = "ramen_teacher_collect"
+path = "tools/data_collection/ramen_teacher_collect.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ramen_export_npy"
+path = "tools/data_collection/ramen_export_npy.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ramen_space_bench"
+path = "tools/data_collection/ramen_space_bench.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ramen_handwritten_choice"
+path = "tools/data_collection/ramen_handwritten_choice.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ramen_advantage_probe"
+path = "tools/data_collection/ramen_advantage_probe.rs"
+# 探针整体依赖 ONNX 网络策略，无 onnx 时没有任何可用功能：
+# 让 cargo 直接跳过该目标，而不是编一个只会 bail 的空壳
+required-features = ["cli", "onnx"]
+
+[features]
+default = ["cli", "diag"]
+diag = []
+cli = [
+    "dep:inquire",
+    "dep:comfy-table",
+    "dep:flexi_logger",
+    "dep:env_logger",
+    "dep:indicatif",
+    "dep:text-to-ascii-art",
+    "dep:clap",
+    "dep:tokio",
+]
+no-color = ["colored/no-color"]
+onnx = ["dep:tract-onnx"]
+# CPU 采样 profiler（sim_profiler bin）。**仅 Linux/macOS 可用**——pprof-rs 用
+# pthread_self / siginfo_t / ucontext_t 等 Unix API，Windows 上编译不过，
+# 因此不放进 default，性能剖析请在 Linux 机器上开此 feature 跑。
+profiler = ["dep:pprof"]
+
+[dependencies]
+anyhow.workspace = true
+bincode.workspace = true
+chrono.workspace = true
+enum-iterator.workspace = true
+fs-err.workspace = true
+hashbrown.workspace = true
+log.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+int-enum = "1.2.0"
+parse-display = "0.11.0"
+colored.workspace = true
+csv.workspace = true
+lexopt.workspace = true
+
+inquire = { workspace = true, optional = true }
+comfy-table = { workspace = true, optional = true }
+flexi_logger = { workspace = true, optional = true }
+env_logger = { workspace = true, optional = true }
+indicatif = { workspace = true, optional = true }
+text-to-ascii-art = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+tract-onnx = { workspace = true, optional = true }
+indexmap.workspace = true
+pprof = { workspace = true, features = ["protobuf-codec"], optional = true }

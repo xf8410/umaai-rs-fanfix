@@ -1,0 +1,57 @@
+[package]
+name = "umaai"
+version = "0.14.0"
+edition = "2024"
+build = "build.rs"
+
+# winscribe 仅在 Windows 目标下作为构建依赖（编译 .ico 资源）
+[target.'cfg(windows)'.build-dependencies]
+winscribe = "0.1.3"
+
+# windows crate 仅为 Windows 专用的 API（GetCurrentThreadStackLimits）服务，
+# 且其依赖链（windows-future 等）在 Linux 上不兼容，故限定目标平台
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32", "Win32_System", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.189"
+
+[features]
+# 发布给用户的二进制必须启用此 feature，否则出错时不会暂停（CI / 自动化场景
+# 会因 stdin 等待而卡住）。发布构建：`cargo build --release --features release-pause`
+release-pause = []
+
+[dependencies]
+# AI 助手 binary：PC 通道层需要终端交互与彩色输出，启用 cli。
+# 不需要规则层诊断日志（diag! 宏体编译期裁剪），关掉 diag feature 以减少噪音与开销。
+# 当前通道层不依赖 onnx（MCTS 走 handwritten leaf eval，对应源码在 main.rs 中已注释），
+# 不引入 tract-onnx 巨大依赖链。
+# 用 features 列表而非 workspace = true，因为 cargo 不允许子 crate 覆盖 workspace 依赖的
+# default-features；显式 path + features 是 cargo 1.97 下的合规做法。
+umasim = { path = "../umasim", default-features = false, features = ["cli"] }
+anyhow.workspace = true
+chrono.workspace = true
+colored.workspace = true
+comfy-table.workspace = true
+enum-iterator.workspace = true
+env_logger.workspace = true
+fs-err.workspace = true
+hashbrown.workspace = true
+indicatif.workspace = true
+inquire.workspace = true
+log.workspace = true
+notify.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+text-to-ascii-art.workspace = true
+flexi_logger.workspace = true
+lexopt.workspace = true
+crossterm = "0.28.1"
+os_str_bytes = "7.1.1"
+dunce = "1.0.5"

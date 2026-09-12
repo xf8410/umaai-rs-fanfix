@@ -1,0 +1,462 @@
+//! 搜索结果
+//!
+//! 定义分数分布统计和搜索输出结构。
+
+use std::cell::Cell;
+
+use serde::{Deserialize, Serialize};
+
+use super::{SearchConfig, terminal::NoTerminalStats};
+use crate::{
+    game::onsen::{action::OnsenAction, game::OnsenGame},
+    sample_collector::action_to_global_index,
+    training_sample::{CHOICE_DIM, TrainingSample}
+};
+
+/// 最大分数（用于分布直方图）
+const MAX_SCORE: usize = 100000;
+
+/// 单个动作的搜索结果
+///
+/// 统计多次模拟的分数分布，支持计算均值、标准差和加权平均分。
+#[derive(Debug, Clone)]
+pub struct ActionResult {
+    /// 分数分布直方图
+    /// distribution[score] = 该分数出现的次数
+    distribution: Vec<u32>,
+
+    /// 模拟次数
+    num: u32,
+
+    /// 分数总和（用于计算均值）
+    pub sum: f64,
+
+    /// 分数平方和（用于计算方差）
+    pub sum_sq: f64,
+
+    /// 最小分数
+    min_score: f64,
+
+    /// 最大分数
+    max_score: f64,
+
+    // ========== 缓存 ==========
+    /// 缓存的加权平均分结果: (radical_factor, result)
+    cached_weighted: Cell<Option<(f64, f64)>>
+}
+
+impl Default for ActionResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ActionResult {
+    /// 创建新的搜索结果
+    pub fn new() -> Self {
+        Self {
+            distribution: vec![0; MAX_SCORE],
+            num: 0,
+            sum: 0.0,
+            sum_sq: 0.0,
+            min_score: f64::MAX,
+            max_score: f64::MIN,
+            cached_weighted: Cell::new(None)
+        }
+    }
+
+    /// 添加一次模拟结果
+    ///
+    /// # 参数
+    /// - `score`: 模拟得到的最终分数
+    pub fn add(&mut self, score: f64) {
+        self.num += 1;
+        self.sum += score;
+        self.sum_sq += score * score;
+
+        // 更新最小最大值
+        self.min_score = self.min_score.min(score);
+        self.max_score = self.max_score.max(score);
+
+        // 更新分布直方图
+        let idx = (score as usize).clamp(0, MAX_SCORE - 1);
+        self.distribution[idx] += 1;
+
+        // 清除缓存（数据已更新）
+        self.cached_weighted.set(None);
+    }
+
+    /// 获取模拟次数
+    pub fn count(&self) -> u32 {
+        self.num
+    }
+
+    /// 计算均值
+    pub fn mean(&self) -> f64 {
+        if self.num == 0 {
+            return 0.0;
+        }
+        self.sum / self.num as f64
+    }
+
+    /// 计算标准差
+    pub fn stdev(&self) -> f64 {
+        if self.num <= 1 {
+            return 0.0;
+        }
+        let n = self.num as f64;
+        let variance = (self.sum_sq - self.sum * self.sum / n) / (n - 1.0);
+        variance.max(0.0).sqrt()
+    }
+
+    /// 计算加权平均分
+    ///
+    /// 使用排名加权的方式计算，激进度越高越偏向高分。
+    /// 结果会被缓存，相同的 radical_factor 不会重复计算。
+    ///
+    /// # 参数
+    /// - `radical_factor`: 激进度因子
+    ///
+    /// # 算法
+    /// 对于每个分数 s：
+    /// - rank_ratio = 累计到 s 的样本比例 0..1
+    /// - weight = rank_ratio^radical_factor -- 在 0..1 范围内 radical_factor 只影响凹凸性. <1时为凹函数
+    /// - weighted_sum += weight * count * s
+    pub fn weighted_mean(&self, radical_factor: f64) -> f64 {
+        if self.num == 0 {
+            return 0.0;
+        }
+
+        // 激进度为 0 时直接返回均值
+        if radical_factor.abs() < 1e-6 {
+            return self.mean();
+        }
+
+        // 检查缓存
+        if let Some((cached_rf, cached_result)) = self.cached_weighted.get() {
+            if (cached_rf - radical_factor).abs() < 1e-9 {
+                return cached_result;
+            }
+        }
+
+        // 计算加权平均分
+        let result = self.compute_weighted_mean(radical_factor);
+
+        // 更新缓存
+        self.cached_weighted.set(Some((radical_factor, result)));
+
+        result
+    }
+
+    /// 内部计算加权平均分（不使用缓存）
+    fn compute_weighted_mean(&self, radical_factor: f64) -> f64 {
+        let n = self.num as f64;
+        let n_inv = 1.0 / n;
+
+        let mut cumulative = 0.0;
+        let mut weighted_sum = 0.0;
+        let mut weight_total = 0.0;
+
+        let end = (self.max_score as usize).min(MAX_SCORE - 1);
+        for (score, &count) in self.distribution[..=end].iter().enumerate() {
+            if count == 0 {
+                continue;
+            }
+
+            let c = count as f64;
+            // 排名比例（累计到当前分数的样本比例）
+            let rank_ratio = (cumulative + 0.5 * c) * n_inv;
+            // 按排名加权
+            let weight = rank_ratio.powf(radical_factor);
+            //println!("ratio={rank_ratio} weight={weight} radical={radical_factor}");
+            weighted_sum += weight * c * score as f64;
+            weight_total += weight * c;
+            cumulative += c;
+        }
+
+        if weight_total > 0.0 {
+            weighted_sum / weight_total
+        } else {
+            self.mean()
+        }
+    }
+
+    /// 获取最小分数
+    pub fn min(&self) -> f64 {
+        if self.num == 0 { 0.0 } else { self.min_score }
+    }
+
+    /// 获取最大分数
+    pub fn max(&self) -> f64 {
+        if self.num == 0 { 0.0 } else { self.max_score }
+    }
+}
+
+/// 搜索输出
+///
+/// 包含所有动作的搜索结果和最优动作信息。
+#[derive(Debug, Clone)]
+pub struct SearchOutput<A = OnsenAction, D = NoTerminalStats> {
+    /// 动作列表
+    pub actions: Vec<A>,
+
+    /// 各动作的搜索结果
+    pub action_results: Vec<(ActionResult, ActionResult)>,
+
+    /// 各动作的终局多维统计（不参与排序）
+    ///
+    /// 第二个类型参数默认为 [`NoTerminalStats`]，故既有的裸 `SearchOutput`
+    /// 写法仍解析为 `SearchOutput<OnsenAction, NoTerminalStats>`，温泉侧无需改动。
+    ///
+    /// 长度始终与 `actions` 一致。未接入观测的剧本每项是 ZST
+    /// [`NoTerminalStats`]，占用为零——注意**不是**空 `Vec`。
+    /// 仅 [`Self::default`] 与 [`Self::new`] 构造出的实例此处为空。
+    pub terminal_results: Vec<D>,
+
+    /// 最优动作索引
+    pub best_action_idx: usize,
+
+    /// 本次搜索使用的激进度因子
+    pub radical_factor: f64,
+
+    /// 按 rollout 序号保留的有序原始分
+    ///
+    /// `None` 表示未开启 [`SearchConfig::record_ordered_rollouts`]（默认）。
+    /// [`Self::new`]、[`Self::with_terminals`] 与 [`Default`] 均置 `None`，
+    /// 生产路径零分配。
+    pub ordered_rollouts: Option<OrderedRollouts>
+}
+
+/// 按 rollout 序号对齐的原始分
+///
+/// 教师数据采集用：一次搜索内各候选的第 k 次 rollout 共享 CRN 种子，
+/// 只有按下标对齐才能做 cross-fitting、对抗 winner curse。
+/// 失败的序号必须留 `None`，不能从 Vec 里删掉，否则后续元素会与其他候选错位。
+#[derive(Debug, Clone)]
+pub struct OrderedRollouts {
+    /// 本次搜索的根种子（CRN 起点）
+    pub root_seed: u64,
+
+    /// 按候选下标 → 按 rollout 序号的原始分（`score` 轴，不是 `score_pt`）
+    ///
+    /// 内层 `None` 表示该次 rollout 失败。
+    pub per_candidate: Vec<Vec<Option<f64>>>
+}
+
+/// 手写而非 `derive(Default)`：后者会给泛型参数加上多余的 `A: Default` 约束，
+/// 而空 `Vec<A>` 本就不需要 `A` 可默认构造。
+impl<A, D> Default for SearchOutput<A, D> {
+    fn default() -> Self {
+        Self {
+            actions: Vec::new(),
+            action_results: Vec::new(),
+            terminal_results: Vec::new(),
+            best_action_idx: 0,
+            radical_factor: 0.0,
+            ordered_rollouts: None
+        }
+    }
+}
+
+impl<A, D> SearchOutput<A, D> {
+    /// 创建搜索输出
+    pub fn new(
+        actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64
+    ) -> Self {
+        Self::with_terminals(actions, action_results, Vec::new(), radical_factor)
+    }
+
+    /// 创建带终局多维统计的搜索输出
+    ///
+    /// `terminal_results` 与 `actions` 按下标对应。未接入观测的剧本传空 `Vec`
+    /// （即 [`Self::new`]）。
+    pub fn with_terminals(
+        actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, terminal_results: Vec<D>,
+        radical_factor: f64
+    ) -> Self {
+        // 找到加权平均分最高的动作
+        let best_action_idx = action_results
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                let wa = a.0.weighted_mean(radical_factor);
+                let wb = b.0.weighted_mean(radical_factor);
+                wa.partial_cmp(&wb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        Self {
+            actions,
+            action_results,
+            terminal_results,
+            best_action_idx,
+            radical_factor,
+            ordered_rollouts: None
+        }
+    }
+
+    /// 获取最优动作
+    pub fn best_action(&self) -> &A {
+        &self.actions[self.best_action_idx]
+    }
+
+    /// 获取 PT 口径下的最优动作
+    pub fn best_action_pt(&self) -> &A {
+        &self.actions[self.best_action_pt_idx()]
+    }
+
+    /// 获取 PT 口径下最优动作的**下标**
+    ///
+    /// 与 [`best_action_pt`](Self::best_action_pt) 同一套排序，只是返回下标。
+    /// 调用方（如 `RamenMctsTrainer`）要把选择结果作为 `Trainer::select_action`
+    /// 的返回值，需要的是下标而不是动作本身；靠 `PartialEq` 反查会在存在等价
+    /// 候选时选错那一个。
+    pub fn best_action_pt_idx(&self) -> usize {
+        self.action_results
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                let wa = a.1.weighted_mean(self.radical_factor);
+                let wb = b.1.weighted_mean(self.radical_factor);
+                wa.partial_cmp(&wb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    /// 获取最优动作的搜索结果
+    pub fn best_result(&self) -> &ActionResult {
+        &self.action_results[self.best_action_idx].0
+    }
+}
+
+impl SearchOutput<OnsenAction> {
+    /// 导出训练样本
+    ///
+    /// 保持温泉专属：依赖 `extract_nn_features` 的 1121 维特征与
+    /// `sample_collector::action_to_global_index` 的 50 维动作映射，
+    /// 两者都是温泉动作空间的假设，泛型化会把该假设带进其他剧本。
+    /// NN 特征编码属 Phase 2 范围。
+    ///
+    /// # 参数
+    /// - `game`: 当前游戏状态
+    /// - `config`: 搜索配置
+    pub fn export_sample(&self, game: &OnsenGame, config: &SearchConfig) -> TrainingSample {
+        // 1. 提取特征
+        let features = game.extract_nn_features(None);
+
+        // 2. Value Target: 最优动作的搜索结果
+        let best = self.best_result();
+        let value_target = vec![
+            best.mean() as f32,
+            best.stdev() as f32,
+            best.weighted_mean(self.radical_factor) as f32,
+        ];
+
+        // 3. Policy Target: softmax(各动作 weighted)
+        let policy_target = self.calc_policy_target(config.policy_delta);
+
+        // 4. Choice Target: 暂时为空（8 维）
+        let choice_target = vec![0.0_f32; CHOICE_DIM];
+
+        TrainingSample::new(features, policy_target, choice_target, value_target)
+    }
+
+    /// 计算 Policy Target
+    ///
+    /// 将各动作的加权平均分通过 softmax 转换为概率分布。
+    fn calc_policy_target(&self, policy_delta: f64) -> Vec<f32> {
+        // 计算各动作的加权平均分
+        let values: Vec<f64> = self
+            .action_results
+            .iter()
+            .map(|r| r.0.weighted_mean(self.radical_factor))
+            .collect();
+
+        // 找到最大值（用于数值稳定性）
+        let max_v = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+        // 计算 exp((v - max) / delta)
+        let exp_values: Vec<f64> = values.iter().map(|v| ((v - max_v) / policy_delta).exp()).collect();
+        let sum: f64 = exp_values.iter().sum();
+
+        // 创建 50 维 policy target
+        let mut policy = vec![0.0_f32; 50];
+
+        // 将概率分配到对应的全局索引
+        for (i, action) in self.actions.iter().enumerate() {
+            if let Some(global_idx) = action_to_global_index(action) {
+                if global_idx < 50 {
+                    policy[global_idx] = (exp_values[i] / sum) as f32;
+                }
+            }
+        }
+
+        policy
+    }
+
+    /// 统计两种评分的动作均分和标准差，用于结果输出
+    pub fn to_scores(&self) -> Vec<Vec<ScoreEntry>> {
+        let mut ret = vec![];
+        for which in 0..2 {
+            let mut entries = vec![];
+            for i in 0..self.actions.len() {
+                let result = match which {
+                    0 => &self.action_results[i].0,
+                    1 => &self.action_results[i].1,
+                    _ => unreachable!()
+                };
+                entries.push(ScoreEntry {
+                    action: self.actions[i].to_string(),
+                    radical_factor: self.radical_factor,
+                    count: result.num as i64,
+                    mean: result.mean(),
+                    weighted_mean: result.weighted_mean(self.radical_factor),
+                    stdev: result.stdev()
+                });
+            }
+            ret.push(entries);
+        }
+        ret
+    }
+}
+
+/// 动作均分和标准差，用于结果输出
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScoreEntry {
+    pub action: String,
+    pub radical_factor: f64,
+    pub count: i64,
+    pub mean: f64,
+    pub weighted_mean: f64,
+    pub stdev: f64
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env::set_current_dir;
+
+    use anyhow::Result;
+
+    use super::ActionResult;
+    use crate::utils::{Checks, get_workspace_root};
+
+    /// 等频双峰在激进度 1 时按 1:3 加权，分布边界沿用分数桶的钳位口径。
+    #[test]
+    fn test_weighted_mean_two_score_groups() -> Result<()> {
+        set_current_dir(get_workspace_root()?)?;
+        let mut checks = Checks::new();
+        let mut result = ActionResult::new();
+        result.add(20_000.0);
+        result.add(80_000.0);
+        checks.check(result.weighted_mean(0.0) == 50_000.0, "激进度 0 使用普通均值");
+        checks.check(result.weighted_mean(1.0) == 65_000.0, "等频双峰按排名加权");
+
+        let mut clipped = ActionResult::new();
+        clipped.add(0.0);
+        clipped.add(110_000.0);
+        checks.check(clipped.weighted_mean(1.0) == 74_999.25, "保留零分桶和最高分桶");
+        checks.finish()
+    }
+}
