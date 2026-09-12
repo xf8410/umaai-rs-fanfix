@@ -1,0 +1,20 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0004-d] with_tokens 增 "rera" token（单 hunk）
+
+锚=0003-d v3 产物（vcurve30 块尾 + else/bail 三行，组合唯一）。
+手验行数：old=6，new=11。
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -1821,6 +1821,11 @@
+                     year.config.vital_curve = true;
+                     year.config.vital_curve_years = [4.0, 3.5, 3.0, 0.25];
+                 }
++            } else if token == "rera" {
++                // 预留上限期权化（fanfix 0004）：r 分年表 40/20/10/0，抬升期望计价。
++                for year in trainer.years.iter_mut() {
++                    year.config.reserve_era = true;
++                }
+             } else {
+                 anyhow::bail!("未知 token: {token}（完整: {tokens}）");
+             }
