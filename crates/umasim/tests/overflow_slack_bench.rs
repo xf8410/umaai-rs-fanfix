@@ -30,7 +30,6 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    println!("build,seed,score,train_rests,races");
     let mut totals: std::collections::BTreeMap<String, (f64, usize, usize, usize)> =
         std::collections::BTreeMap::new();
 
@@ -39,8 +38,8 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         for i in 0..RUNS {
             let seed = BASE_SEED + i;
             let (mut rng, rule_master) = seeded_rngs(BASE_SEED, i);
-            let _ = rule_master; // 手写策略整局不注入规则主种子，保持与上游 bench 缺省一致
             let mut game = RamenGame::newgame(UMA, &deck_ids, inherit.clone())?;
+            game.set_rule_master(rule_master);
             let trainer = RecommendedRamenTrainer::new();
             let logged = LoggingTrainer::new(trainer, seed);
             game.run_full_game(&logged, &mut rng)?;
@@ -56,9 +55,8 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|r| r.stage == "Train" && r.action_desc.contains("比赛"))
                 .count();
             let score = game.uma.calc_score();
-            println!("{},{}", build.name(), seed);
-            println!("  score={score} rests={rests} races={races}");
-            let e = totals.entry(build.name()).or_insert((0.0, 0, 0, 0));
+            println!("{} seed={seed} score={score} rests={rests} races={races}", build.name());
+            let e = totals.entry(build.name().to_string()).or_insert((0.0, 0, 0, 0));
             e.0 += score as f64;
             e.1 += rests;
             e.2 += races;
@@ -66,7 +64,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 汇总（{} 局/build）=====", RUNS);
+    println!("\n===== 汇总（{RUNS} 局/build）=====");
     let mut g_score = 0.0;
     let mut g_rest = 0usize;
     let mut g_race = 0usize;
