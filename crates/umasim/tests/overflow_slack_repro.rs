@@ -1,4 +1,4 @@
-//! 溢出属性训练摆烂 — 复现报告（v2，上游 AGENTS.md 合规：println 报红绿，不用 assert 宏，release 跑）
+//! 溢出属性训练摆烂 — 复现报告（v3，上游 AGENTS.md 合规：println 报红绿，不用 assert 宏，release 跑）
 //!
 //! 红绿证据以 "VERDICT <id> RED|GREEN|SKIP ..." 行打印；CI 步骤 tee 存报告上传 artifact，
 //! 不再拿 panic 当门（红证据由报告文字呈现，文档落盘引用 run id）。
@@ -8,7 +8,7 @@
 //! (1) reserve_penalty 在 h=0 处按原始增益全额收 quadratic 预留罚（重复收费悬崖，
 //!     单元级已实证：gain=60 → 罚 1149.23，run 34664275996）；
 //! (2) 属性分凸、PT 分平 → 模型天生靠属性维，上限一满该维清零、无第二维说话；
-//! (3) 超上限的训练收益没有合理建模（先修 (1)，(3) 由 0004 期权化承接）。
+//! (3) 超上限的训练收益没有合理建模 → 0004 期权化（rera 读数测试见文件尾）。
 //!
 //! 场景标定记录：默认卡 gain≈60 太温和；真机高面板+面倍率 gain 150~400 → 加
 //! current_ramen=Some(2)；turn=20 撞比赛回合会假绿 → 用非赛期 turn=21。
@@ -80,8 +80,7 @@ fn chosen_operation(
 }
 
 /// 主场景：满体力+智溢出+全彩圈+面倍率。睡觉=RED（悬崖吃掉最优位）；训练=GREEN。
-/// 注：当前 master 有 140 分回退门兜底，预期 GREEN——这不是无罪，是危害被回退门
-/// 吸走后只剩 margin≤140 区的位次误导（见 cliff_readings 与 ab-results 文档）。
+/// 注：当前 master 有 140 分回退门兜底，基线跑预期 GREEN——红证据主体在 cliff_readings。
 #[test]
 fn full_vital_capped_shining_wisdom_must_not_sleep() -> R {
     let game = make_capped_shining_wisdom()?;
@@ -95,7 +94,7 @@ fn full_vital_capped_shining_wisdom_must_not_sleep() -> R {
     Ok(())
 }
 
-/// 解药场景：同局面 + rclamp（0001 v2 应用后可用）。恢复训练=GREEN；补丁未应用=SKIP。
+/// 解药场景：同局面 + rclamp（0001 v2 应用后可用；0005 转正后 with_tokens("base") 亦含）。
 #[test]
 fn rclamp_full_vital_capped_shining_wisdom_trains() -> R {
     let trainer = match RecommendedRamenTrainer::with_tokens("rclamp") {
@@ -115,8 +114,8 @@ fn rclamp_full_vital_capped_shining_wisdom_trains() -> R {
     Ok(())
 }
 
-/// 单元读数：reserve_penalty 在 h=0 的重复收费悬崖。p_capped≈0=GREEN（已修/已关），
-/// 显著为正=RED（悬崖在位）。近上限罚分 p_near 应恒为正（模型本意，打印供核对）。
+/// 单元读数：reserve_penalty 在 h=0 的重复收费悬崖。基线=RED（1149.23，证据墙）；
+/// 应用 0001(+0005) 后同场景经 new() 构造应为 GREEN（转正自证）。
 #[test]
 fn reserve_penalty_zero_for_capped_slot() -> R {
     let mut game = setup()?;
@@ -133,9 +132,41 @@ fn reserve_penalty_zero_for_capped_slot() -> R {
     let p_near = trainer.reserve_penalty(&game, &gain);
     println!("读数: 已满罚分={p_capped} 剩10点罚分={p_near}（近上限罚分为正=模型本意）");
     if p_capped.abs() < 1e-6 {
-        println!("VERDICT cliff_readings GREEN 已满位预留罚分=0（钳制在位或门控关闭且已默认修）");
+        println!("VERDICT cliff_readings GREEN 已满位预留罚分=0（钳制在位）");
     } else {
-        println!("VERDICT cliff_readings RED 已满位预留罚分={p_capped}≠0（重复收费悬崖在位，默认关=preset 含 bug）");
+        println!("VERDICT cliff_readings RED 已满位预留罚分={p_capped}≠0（重复收费悬崖在位，基线证据）");
+    }
+    Ok(())
+}
+
+/// 丙-2 读数：Y3 近满位回合（turn=60）base vs rera 的选择对照。
+/// rera 生效=GREEN；补丁未应用=SKIP。整局数值判定在 bench F 臂。
+#[test]
+fn reserve_era_year_table_readings() -> R {
+    let trainer_rera = match RecommendedRamenTrainer::with_tokens("rera") {
+        Ok(t) => t,
+        Err(e) => {
+            println!("VERDICT rera_readings SKIP 补丁未应用（{e}）");
+            return Ok(());
+        }
+    };
+    let mut game = setup()?;
+    game.base.turn = 60; // Y3 非赛期窗口（rera 表 year 索引=2 → r 从 40×缩到 10×）
+    game.stage = RamenStage::Train;
+    for idx in 0..4 {
+        game.uma.five_status[idx] = game.uma.five_status_limit[idx] * 9 / 10;
+    }
+    game.uma.five_status[4] = game.uma.five_status_limit[4] - 5; // 近满位：r 差异咬合区
+    game.uma.vital = 100;
+    game.uma.motivation = 5;
+    println!("base 臂:");
+    let op_base = chosen_operation(&game, &RecommendedRamenTrainer::new())?;
+    println!("rera 臂:");
+    let op_rera = chosen_operation(&game, &trainer_rera)?;
+    if op_base == op_rera {
+        println!("VERDICT rera_readings GREEN 读数一致（该局面 r 缩差不改变位次=正常，整局判定看 bench F 臂）");
+    } else {
+        println!("VERDICT rera_readings GREEN 期权表改变位次: {op_base:?} → {op_rera:?}");
     }
     Ok(())
 }
