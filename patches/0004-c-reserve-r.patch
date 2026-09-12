@@ -1,0 +1,19 @@
+From: xf8410/umaai-rs-fanfix overflow-slack investigation
+Subject: [PATCH 0004-c] reserve_penalty 的 r 改按年份表取（单 hunk）
+
+锚=上游原文（0001 只改循环体内的 a 行，与此不冲突；字节通道实读 L605-607）。
+年索引与 0003-c 同约定：year=(turn/24).min(3)，URA(72+)=索引3。
+手验行数：old=3，new=8。
+
+--- a/crates/umasim/src/trainer/local_ramen_trainer.rs
++++ b/crates/umasim/src/trainer/local_ramen_trainer.rs
+@@ -605,3 +605,8 @@
+         let rem = (76 - g.turn()).max(0) as f32;
+-        let r = self.config.status_reserve_max * rem / 76.;
++        let r = if self.config.reserve_era {
++            let year = ((g.turn() / 24).min(3)) as usize;
++            self.config.reserve_era_years[year].max(0.) * rem / 76.
++        } else {
++            self.config.status_reserve_max * rem / 76.
++        };
+         let mut p = 0.;
