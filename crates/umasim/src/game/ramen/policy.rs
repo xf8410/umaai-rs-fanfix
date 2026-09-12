@@ -23,7 +23,8 @@ use crate::{
     game::{
         ramen::{Operation, RamenAction, RamenGame},
         traits::Game,
-        CardTrainingEffect
+        CardTrainingEffect,
+        PersonType
     },
     gamedata::{ActionValue, EventChoice, FreeRaceData, GAMECONSTANTS, ramen::RAMENDATA},
     global,
@@ -162,7 +163,13 @@ pub struct RamenPolicyConfig {
     /// 事件干劲每点折算
     pub event_motivation_weight: f32,
     /// 事件获得 bad flag（ill/bad_trainer）的惩罚
-    pub event_bad_flag_penalty: f32
+    pub event_bad_flag_penalty: f32,
+    /// 溢出诀窍槽计价（fanfix 0009，反摆烂 v1）：主位已满（cap_left=0）的训练回合，
+    /// 属性差分被截断后打分层只剩 PT——但训练的诀窍槽产出（→诀窍→面经济）照常记账，
+    /// 从未计价，AI 误判「练了白练」而摆烂（溢出属性训练摆烂，小黑板已知问题）。
+    /// 本项计价 `weight × 期望槽增量 / GAUGE_LIMIT(7)` ≈ 期望诀窍数 × 权重；非溢出回合恒 0。
+    /// `0.0`（默认）= 关闭，逐位不变。量级与 `region_xunlian_weight` 同族（扫描定，初始 20-40）。
+    pub overflow_feeling_weight: f32
 }
 
 impl Default for RamenPolicyConfig {
@@ -199,7 +206,8 @@ impl Default for RamenPolicyConfig {
             region_weak_cover_weight: 0.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
-            event_bad_flag_penalty: 300.0
+            event_bad_flag_penalty: 300.0,
+            overflow_feeling_weight: 0.0
         }
     }
 }
@@ -814,9 +822,31 @@ impl RamenPolicy {
         // 体力成本（消耗按 train_vital_value 折算）
         let vital_cost = (-value.vital).max(0) as f32 * self.config.train_vital_value;
         let shining = eval.shining as f32 * self.config.shining_bonus;
+        // 溢出诀窍槽计价（fanfix 0009，反摆烂 v1）：主位已满（cap_left=0）时，训练的属性
+        // 差分被截断，但诀窍槽产出照常发生（基础分布 + 角标加成 + 友情各槽+2）却从未计价，
+        // AI 因此误判「练了白练」而摆烂（溢出属性训练摆烂，小黑板已知问题）。
+        // 输入口径与 fill_feeling_gauge 完全一致；夏合宿全 MAX 回合稀少，v1 不单列。
+        let feel = if self.config.overflow_feeling_weight > 0.0 && cap_left == 0 {
+            let support_count = game.distribution[train]
+                .iter()
+                .filter(|&&p| p >= 0 && game.persons[p as usize].person_type == PersonType::Card)
+                .count();
+            let npc_count = game.distribution[train]
+                .iter()
+                .filter(|&&p| p >= 0 && game.persons[p as usize].person_type == PersonType::Npc)
+                .count();
+            let train_bonus = super::rules::calc_train_feeling_bonus(support_count, npc_count);
+            let base_total: i32 =
+                super::rules::calc_gauge_base_distribution(&game.ramen.selected_regions).iter().sum();
+            let shine_add = if eval.shining > 0 { 6 } else { 0 }; // 友情训练三槽各 +2
+            let slot_inc = (base_total + train_bonus + shine_add).max(0) as f32;
+            self.config.overflow_feeling_weight * slot_inc / super::rules::GAUGE_LIMIT as f32
+        } else {
+            0.0
+        };
         // 失败的期望损失：成功时才有的收益 × 失败率 + 固定失败惩罚 × 失败率
         let fail_p = fail_rate / 100.0;
-        let gross = attr + pt - vital_cost + shining;
+        let gross = attr + pt - vital_cost + shining + feel;
         let fail_adj = -(gross * fail_p + self.config.failure_penalty * fail_p);
         out.score = gross + fail_adj;
         out.train_fail_adj = fail_adj;
@@ -827,6 +857,7 @@ impl RamenPolicy {
             out.add("vital_cost", -vital_cost);
             out.add("shining", shining);
             out.add("fail_adj", fail_adj);
+            out.add("overflow_feeling", feel);
             out.reason = format!(
                 "{}训练 失败率{fail_rate:.0}% 属性+{attr_gain:.0} PT+{pt_gain:.0}",
                 global!(GAMECONSTANTS).train_names[train]

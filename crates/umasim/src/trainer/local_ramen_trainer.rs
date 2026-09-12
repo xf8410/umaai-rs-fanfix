@@ -1772,6 +1772,12 @@ impl RecommendedRamenTrainer {
                 trainer.years[1].config.power_overflow_strength = v.parse::<f32>()? / 100.0;
             } else if let Some(v) = token.strip_prefix("p3o") {
                 trainer.years[2].config.power_overflow_strength = v.parse::<f32>()? / 100.0;
+            } else if let Some(v) = token.strip_prefix("feel") {
+                // 溢出诀窍槽计价（fanfix 0009，反摆烂 v1）：feel30 → weight=30.0，全年生效。
+                let w: f32 = v.parse()?;
+                for year in trainer.years.iter_mut() {
+                    year.policy.config.overflow_feeling_weight = w;
+                }
             } else if let Some(v) = token.strip_prefix("pg") {
                 // EXP-006e：power 短板追赶覆盖。负值用 'm' 前缀编码（'-' 是 token
                 // 分隔符）：pgm30 → −0.30，pg30 → +0.30。

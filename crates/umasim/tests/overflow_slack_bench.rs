@@ -61,7 +61,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 9] = [
+    let arm_defs: [(&str, &str); 12] = [
         ("A-preset(转正)", "base"),
         ("B-rclamp", "rclamp"),
         ("C-vcurve", "vcurve"),
@@ -71,6 +71,9 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         ("G-capf25", "capf25"),
         ("H-restdamp", "restdamp"),
         ("I-slack20", "slack20"),
+        ("J-feelprice30", "feel30"),
+        ("K-slack40", "slack40"),
+        ("L-slack60", "slack60"),
     ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
