@@ -1778,6 +1778,15 @@ impl RecommendedRamenTrainer {
                 for year in trainer.years.iter_mut() {
                     year.policy.config.overflow_feeling_weight = w;
                 }
+            } else if let Some(v) = token.strip_prefix("recv") {
+                // 训练回体计价（fanfix 0010，反摆烂 v2）：recv18 → train_recovery_value=1.8。
+                // 读数规则与 feel 族一致（整数÷10）。权重依据见
+                // RamenPolicyConfig::train_recovery_value 字段注释：与体力消耗影子价
+                // 1.8 对称、低于专职恢复的休息价 2.5，非魔法数字。
+                let w: f32 = v.parse::<f32>()? / 10.0;
+                for year in trainer.years.iter_mut() {
+                    year.policy.config.train_recovery_value = w;
+                }
             } else if let Some(v) = token.strip_prefix("pg") {
                 // EXP-006e：power 短板追赶覆盖。负值用 'm' 前缀编码（'-' 是 token
                 // 分隔符）：pgm30 → −0.30，pg30 → +0.30。

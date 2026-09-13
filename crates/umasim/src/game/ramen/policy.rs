@@ -169,7 +169,20 @@ pub struct RamenPolicyConfig {
     /// 从未计价，AI 误判「练了白练」而摆烂（溢出属性训练摆烂，小黑板已知问题）。
     /// 本项计价 `weight × 期望槽增量 / GAUGE_LIMIT(7)` ≈ 期望诀窍数 × 权重；非溢出回合恒 0。
     /// `0.0`（默认）= 关闭，逐位不变。量级与 `region_xunlian_weight` 同族（扫描定，初始 20-40）。
-    pub overflow_feeling_weight: f32
+    pub overflow_feeling_weight: f32,
+    /// 训练回体力计价（fanfix 0010，反摆烂 v2）：每点「训练正回体」计入训练毛分的影子价。
+    /// 默认 `0.0` = 不计价，逐位保留旧行为。
+    ///
+    /// 依据（结算层事实，非脑补）：
+    /// - 结算口径：`ActionValue.vital` 为正表示该训练回复体力（智慧训练 +5，
+    ///   由训练面结算 `default_calc_training_value` 产出）。训练分公式的体力项历来
+    ///   只计消耗 `(-value.vital).max(0) * train_vital_value`，正回体被 `.max(0)`
+    ///   丢弃、完全无价（见 docs/source-valuation-report.md §3「训练回体力 不计值」）。
+    /// - 影子价取值 1.8：与同公式消耗侧 `train_vital_value`（默认 1.8）对称——同一体力
+    ///   账户的收入与支出用同一影子价，零新增魔法数字；且必须 ≤ 专职恢复动作的定价
+    ///   `rest_vital_value`（默认 2.5），否则训练回体会被高估到超过休息本身。
+    /// - 计价含于 `gross`：与属性/PT 同样接受失败率期望折扣（回体仅成功时到手）。
+    pub train_recovery_value: f32
 }
 
 impl Default for RamenPolicyConfig {
@@ -207,7 +220,9 @@ impl Default for RamenPolicyConfig {
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0,
-            overflow_feeling_weight: 0.0
+            overflow_feeling_weight: 0.0,
+            // 训练回体计价（fanfix 0010）：默认关，基准实验后定去留（权重依据见字段注释）。
+            train_recovery_value: 0.0
         }
     }
 }
@@ -846,7 +861,13 @@ impl RamenPolicy {
         };
         // 失败的期望损失：成功时才有的收益 × 失败率 + 固定失败惩罚 × 失败率
         let fail_p = fail_rate / 100.0;
-        let gross = attr + pt - vital_cost + shining + feel;
+        // 训练回体力计价（fanfix 0010，反摆烂 v2）：结算层智慧等槽位带正回体（如+5），
+        // 原公式只计消耗 (-value.vital).max(0)，回体无价（source-valuation-report §3）。
+        // 口径 = ActionValue.vital 正部（与消耗侧同一字段同一口径）× 影子价；
+        // 计入 gross 故与属性/PT 同样接受失败率折扣。权重来源与上界见
+        // RamenPolicyConfig::train_recovery_value 字段注释。
+        let vital_recovery = value.vital.max(0) as f32 * self.config.train_recovery_value;
+        let gross = attr + pt - vital_cost + shining + feel + vital_recovery;
         let fail_adj = -(gross * fail_p + self.config.failure_penalty * fail_p);
         out.score = gross + fail_adj;
         out.train_fail_adj = fail_adj;
@@ -858,6 +879,9 @@ impl RamenPolicy {
             out.add("shining", shining);
             out.add("fail_adj", fail_adj);
             out.add("overflow_feeling", feel);
+            if vital_recovery != 0.0 {
+                out.add("train_recovery", vital_recovery);
+            }
             out.reason = format!(
                 "{}训练 失败率{fail_rate:.0}% 属性+{attr_gain:.0} PT+{pt_gain:.0}",
                 global!(GAMECONSTANTS).train_names[train]

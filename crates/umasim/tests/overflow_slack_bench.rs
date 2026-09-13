@@ -8,6 +8,9 @@
 //! 臂 G = capf25（0006：满位副属性折扣下限 0.25——收益侧零化修复）
 //! 臂 H = restdamp（0007：休息价值分年折扣 [1.0,0.9,0.6,0.3]——恢复侧定价）
 //! 臂 I = slack20（0008：status_gain 上限期权计价 +20——选择层有界前瞻）
+//! 臂 M = recv18（fanfix 0010：训练正回体计价 1.8/点——无价收益通道补账，
+//! 口径=ActionValue.vital 正部×影子价；权重=消耗侧 train_vital_value 对称值）
+//! 臂 N = recv9（0010 半剂量敏感性：0.9/点，验证剂量-响应）
 //! 计量：train/game、rests/game（守门标/anon/打分）、自选比赛、终局分。
 //! 判读（一次一变量，各自独立对 A）：见 docs/bench-v10-hypotheses.md 的否决线；
 //! 任何新臂终局分劣于 A 超过噪声带（≈0.15%）即判负留档，不进组合臂。
@@ -47,6 +50,7 @@ struct Agg {
     rest_gate_anon: usize,
     rest_scoring: usize,
     train_turns: usize,
+    wisdom_picks: usize,
 }
 
 #[test]
@@ -61,7 +65,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 12] = [
+    let arm_defs: [(&str, &str); 14] = [
         ("A-preset(转正)", "base"),
         ("B-rclamp", "rclamp"),
         ("C-vcurve", "vcurve"),
@@ -74,6 +78,8 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         ("J-feelprice30", "feel30"),
         ("K-slack40", "slack40"),
         ("L-slack60", "slack60"),
+        ("M-recv18", "recv18"),
+        ("N-recv9", "recv9"),
     ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
@@ -117,6 +123,9 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else if row.action_desc.contains("训练") {
                         a.train_turns += 1;
+                        if row.action_desc.contains("智") {
+                            a.wisdom_picks += 1;
+                        }
                     } else if row.action_desc.contains("休息") {
                         let bd = row.score_breakdown.clone().unwrap_or_default();
                         if bd.contains("守门") {
@@ -148,14 +157,15 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
         let g = a.games as f64;
         println!(
-            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(守门 {:.2}+打分 {:.2}+anon {:.2}) | 自选比赛/game={:.2}",
+            "{name}: mean_score={:.1} | train/game={:.2} rests/game={:.2}(守门 {:.2}+打分 {:.2}+anon {:.2}) | 自选比赛/game={:.2} | 智训率={:.1}%",
             a.score / g,
             a.train_turns as f64 / g,
             (a.rest_gate_marked + a.rest_gate_anon + a.rest_scoring) as f64 / g,
             a.rest_gate_marked as f64 / g,
             a.rest_scoring as f64 / g,
             a.rest_gate_anon as f64 / g,
-            a.race_free as f64 / g
+            a.race_free as f64 / g,
+            if a.train_turns > 0 { a.wisdom_picks as f64 / a.train_turns as f64 * 100.0 } else { 0.0 }
         );
     }
     Ok(())
