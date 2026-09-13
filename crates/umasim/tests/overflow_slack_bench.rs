@@ -1,4 +1,4 @@
-//! 溢出摆烂 A/B 整局基准 v10 —— 九臂：转正对照 × 留档哨兵 × 三新臂首测
+//! 溢出摆烂 A/B 整局基准 v11 —— 17 臂：转正对照 × 留档哨兵 × EXP-006c 智力豁免剂量扫描
 //!
 //! 前置：CI 顺序应用 0001 + 0003 a-d + 0004 a-d + 0005（转正）+ 0006 + 0007 + 0008。
 //! 臂 A = base（**0005 已转正：A=preset+rclamp 行为**；预期与 B 等值=转正自检）
@@ -11,6 +11,10 @@
 //! 臂 M = recv18（fanfix 0010：训练正回体计价 1.8/点——无价收益通道补账，
 //! 口径=ActionValue.vital 正部×影子价；权重=消耗侧 train_vital_value 对称值）
 //! 臂 N = recv9（0010 半剂量敏感性：0.9/点，验证剂量-响应）
+//! 臂 O = wisf32（EXP-006c 剂量①：仅豁免近零风险区 vital∈[32,45)——32=失败率体力阈值，
+//! 出处：policy.rs 智力豁免注释「失败率体力阈值 ~32」；只放确定性安全区）
+//! 臂 P = wisf20（EXP-006c 剂量②：下限放宽到 20，剂量-响应中档）
+//! 臂 Q = wisf0（EXP-006c 剂量③：45 以下全豁免，最大剂量；0009 卷宗误杀案体力=29 在此档获救）
 //! 计量：train/game、rests/game（守门标/anon/打分）、自选比赛、终局分。
 //! 判读（一次一变量，各自独立对 A）：见 docs/bench-v10-hypotheses.md 的否决线；
 //! 任何新臂终局分劣于 A 超过噪声带（≈0.15%）即判负留档，不进组合臂。
@@ -65,7 +69,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         extra_count: [10, 10, 20, 20, 20, 40],
     };
 
-    let arm_defs: [(&str, &str); 14] = [
+    let arm_defs: [(&str, &str); 17] = [
         ("A-preset(转正)", "base"),
         ("B-rclamp", "rclamp"),
         ("C-vcurve", "vcurve"),
@@ -80,6 +84,9 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         ("L-slack60", "slack60"),
         ("M-recv18", "recv18"),
         ("N-recv9", "recv9"),
+        ("O-wisf32", "wisf32"),
+        ("P-wisf20", "wisf20"),
+        ("Q-wisf0", "wisf0"),
     ];
     let mut aggs: Vec<(&str, Agg)> = arm_defs.iter().map(|(n, _)| (*n, Agg::default())).collect();
     let mut skipped: Vec<&str> = Vec::new();
@@ -149,7 +156,7 @@ fn overflow_slack_bench_ab() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n===== 转正对照 × 体力曲线 × 期权化 A/B（{RUNS} 局/build × 9 臂）=====");
+    println!("\n===== 转正对照 × 体力曲线 × 期权化 A/B（{RUNS} 局/build × 17 臂）=====");
     for (name, a) in &aggs {
         if a.games == 0 {
             println!("{name}: 跳过（构造失败，见上方日志）");
